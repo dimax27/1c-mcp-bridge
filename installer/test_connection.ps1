@@ -37,7 +37,7 @@ try {
 
     Out "Читаю параметры..."
     $params = @{}
-    foreach ($line in Get-Content $ParamsFile -Encoding UTF8) {
+    foreach ($line in Get-Content $ParamsFile -Encoding Default) {
         if ($line -match '^([^=]+)=(.*)$') {
             $params[$matches[1].Trim()] = $matches[2].Trim()
         }
