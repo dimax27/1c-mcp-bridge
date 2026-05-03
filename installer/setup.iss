@@ -63,6 +63,9 @@ Source: "test_connection.ps1";           DestDir: "{app}\installer";    Flags: i
 Source: "uninstall.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "detect_1c.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
 
+; Тот же test_connection.ps1, но dontcopy — для запуска из мастера до этапа установки
+Source: "test_connection.ps1";           Flags: dontcopy
+
 ; Иконка (опционально, см. assets/)
 Source: "..\assets\icon.ico";            DestDir: "{app}\assets";       Flags: ignoreversion skipifsourcedoesntexist
 
@@ -273,43 +276,44 @@ procedure UpdateAuthFields(Sender: TObject); forward;
 
 procedure CreateConnectionParamsPage;
 var
-  Y: Integer;
+  Y, HalfW: Integer;
 begin
   PageConnectionParams := CreateCustomPage(PageConnectionMode.ID,
     'Параметры подключения',
     'Введите данные для подключения к информационной базе 1С.');
 
   Y := 0;
+  HalfW := (PageConnectionParams.SurfaceWidth - 12) div 2;
 
-  // --- Файловая база ---
+  // --- Файловая база (показывается только при выборе файлового режима) ---
   LblFileBase := TNewStaticText.Create(PageConnectionParams);
   LblFileBase.Parent := PageConnectionParams.Surface;
   LblFileBase.Caption := 'Путь к каталогу файловой базы (.1CD):';
   LblFileBase.Top := Y;
   LblFileBase.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + LblFileBase.Height + 4;
+  Y := Y + LblFileBase.Height + 2;
 
   EditFileBasePath := TNewEdit.Create(PageConnectionParams);
   EditFileBasePath.Parent := PageConnectionParams.Surface;
   EditFileBasePath.Top := Y;
   EditFileBasePath.Width := PageConnectionParams.SurfaceWidth;
   EditFileBasePath.Text := 'C:\1C\bases\MyBase';
-  Y := Y + EditFileBasePath.Height + 16;
+  Y := Y + EditFileBasePath.Height + 10;
 
   // --- Сервер ---
   LblServer := TNewStaticText.Create(PageConnectionParams);
   LblServer.Parent := PageConnectionParams.Surface;
-  LblServer.Caption := 'Адрес сервера 1С (Srvr), например 127.0.0.1 или srv-1c:1541:';
+  LblServer.Caption := 'Адрес сервера 1С (Srvr):';
   LblServer.Top := Y;
   LblServer.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + LblServer.Height + 4;
+  Y := Y + LblServer.Height + 2;
 
   EditServerName := TNewEdit.Create(PageConnectionParams);
   EditServerName.Parent := PageConnectionParams.Surface;
   EditServerName.Top := Y;
   EditServerName.Width := PageConnectionParams.SurfaceWidth;
   EditServerName.Text := '127.0.0.1';
-  Y := Y + EditServerName.Height + 12;
+  Y := Y + EditServerName.Height + 8;
 
   // --- Имя ИБ ---
   LblRef := TNewStaticText.Create(PageConnectionParams);
@@ -317,13 +321,13 @@ begin
   LblRef.Caption := 'Имя информационной базы в кластере (Ref):';
   LblRef.Top := Y;
   LblRef.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + LblRef.Height + 4;
+  Y := Y + LblRef.Height + 2;
 
   EditRefName := TNewEdit.Create(PageConnectionParams);
   EditRefName.Parent := PageConnectionParams.Surface;
   EditRefName.Top := Y;
   EditRefName.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + EditRefName.Height + 16;
+  Y := Y + EditRefName.Height + 12;
 
   // --- OS-аутентификация ---
   CheckOSAuth := TNewCheckBox.Create(PageConnectionParams);
@@ -333,40 +337,44 @@ begin
   CheckOSAuth.Width := PageConnectionParams.SurfaceWidth;
   CheckOSAuth.Checked := True;
   CheckOSAuth.OnClick := @UpdateAuthFields;
-  Y := Y + CheckOSAuth.Height + 4;
+  Y := Y + CheckOSAuth.Height + 8;
 
+  // Hint вместо отдельной строки убираем — он избыточный.
   LblOSAuthHint := TNewStaticText.Create(PageConnectionParams);
   LblOSAuthHint.Parent := PageConnectionParams.Surface;
-  LblOSAuthHint.Caption := 'При снятой галочке введите логин и пароль пользователя 1С.';
-  LblOSAuthHint.Top := Y;
-  LblOSAuthHint.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + LblOSAuthHint.Height + 12;
+  LblOSAuthHint.Caption := '';
+  LblOSAuthHint.Top := 0;
+  LblOSAuthHint.Width := 0;
+  LblOSAuthHint.Visible := False;
 
-  // --- Логин/Пароль ---
+  // --- Логин и пароль в одну строку ---
   LblUser := TNewStaticText.Create(PageConnectionParams);
   LblUser.Parent := PageConnectionParams.Surface;
-  LblUser.Caption := 'Логин пользователя 1С:';
+  LblUser.Caption := 'Логин 1С:';
   LblUser.Top := Y;
-  LblUser.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + LblUser.Height + 4;
-
-  EditUser := TNewEdit.Create(PageConnectionParams);
-  EditUser.Parent := PageConnectionParams.Surface;
-  EditUser.Top := Y;
-  EditUser.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + EditUser.Height + 8;
+  LblUser.Width := HalfW;
+  LblUser.Left := 0;
 
   LblPwd := TNewStaticText.Create(PageConnectionParams);
   LblPwd.Parent := PageConnectionParams.Surface;
   LblPwd.Caption := 'Пароль:';
   LblPwd.Top := Y;
-  LblPwd.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + LblPwd.Height + 4;
+  LblPwd.Width := HalfW;
+  LblPwd.Left := HalfW + 12;
+
+  Y := Y + LblUser.Height + 2;
+
+  EditUser := TNewEdit.Create(PageConnectionParams);
+  EditUser.Parent := PageConnectionParams.Surface;
+  EditUser.Top := Y;
+  EditUser.Width := HalfW;
+  EditUser.Left := 0;
 
   EditPassword := TNewEdit.Create(PageConnectionParams);
   EditPassword.Parent := PageConnectionParams.Surface;
   EditPassword.Top := Y;
-  EditPassword.Width := PageConnectionParams.SurfaceWidth;
+  EditPassword.Width := HalfW;
+  EditPassword.Left := HalfW + 12;
   EditPassword.PasswordChar := '*';
 end;
 
@@ -457,36 +465,66 @@ end;
 procedure TestConnectionClick(Sender: TObject);
 var
   ResultCode: Integer;
-  TmpFile, Cmd, Output: String;
+  TmpFile, ScriptFile, ParamsFile, Cmd, Output: String;
   AOutput: AnsiString;
 begin
   MemoTestOutput.Lines.Clear;
   MemoTestOutput.Lines.Add('Запускаю проверку...');
-  MemoTestOutput.Lines.Add('');
+  MemoTestOutput.Update;
 
-  TmpFile := ExpandConstant('{tmp}\test_output.txt');
+  TmpFile    := ExpandConstant('{tmp}\test_output.txt');
+  ParamsFile := ExpandConstant('{tmp}\test_params.txt');
+  ScriptFile := ExpandConstant('{tmp}\test_connection.ps1');
 
-  // Кладём parameters во временный файл — чтобы не возиться с экранированием на cmd-line
-  SaveStringToFile(ExpandConstant('{tmp}\test_params.txt'),
+  // Извлечь скрипт во временную папку (помечен dontcopy в [Files])
+  try
+    ExtractTemporaryFile('test_connection.ps1');
+  except
+    MemoTestOutput.Lines.Clear;
+    MemoTestOutput.Lines.Add('Ошибка: не удалось извлечь test_connection.ps1');
+    MemoTestOutput.Lines.Add(GetExceptionMessage);
+    TestPassed := False;
+    Exit;
+  end;
+
+  // Параметры в файл — чтобы не возиться с экранированием на cmd-line
+  SaveStringToFile(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
     'DLLPATH=' + GetSelectedDllPath + #13#10, False);
 
-  Cmd := '-ExecutionPolicy Bypass -NoProfile -File "' +
-         ExpandConstant('{src}\test_connection.ps1') + '" -ParamsFile "' +
-         ExpandConstant('{tmp}\test_params.txt') + '" -OutputFile "' + TmpFile + '"';
+  // Чистим прошлый output
+  if FileExists(TmpFile) then DeleteFile(TmpFile);
 
-  if Exec('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  Cmd := '-ExecutionPolicy Bypass -NoProfile -File "' + ScriptFile + '"' +
+         ' -ParamsFile "' + ParamsFile + '"' +
+         ' -OutputFile "' + TmpFile + '"';
+
+  if not Exec('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    LoadStringFromFile(TmpFile, AOutput); Output := String(AOutput);
-    MemoTestOutput.Lines.Text := Output;
-    TestPassed := (ResultCode = 0);
-  end
-  else
-  begin
+    MemoTestOutput.Lines.Clear;
     MemoTestOutput.Lines.Add('Не удалось запустить PowerShell.');
     TestPassed := False;
+    Exit;
   end;
+
+  if FileExists(TmpFile) then
+  begin
+    if LoadStringFromFile(TmpFile, AOutput) then
+    begin
+      Output := String(AOutput);
+      MemoTestOutput.Lines.Text := Output;
+    end
+    else
+      MemoTestOutput.Lines.Text := 'PowerShell завершился (код ' + IntToStr(ResultCode) +
+                                   '), но output-файл не удалось прочитать.';
+  end
+  else
+    MemoTestOutput.Lines.Text := 'PowerShell завершился (код ' + IntToStr(ResultCode) +
+                                 '), но output-файл не создан.' + #13#10 +
+                                 'Возможно, политика выполнения скриптов блокирует запуск.';
+
+  TestPassed := (ResultCode = 0);
 end;
 
 // ----------------------------------------------------------------------------
