@@ -323,7 +323,7 @@ begin
   EditPassword.Parent := PageConnectionParams.Surface;
   EditPassword.Top := Y;
   EditPassword.Width := PageConnectionParams.SurfaceWidth;
-  EditPassword.Password := True;
+  EditPassword.PasswordChar := '*';
 end;
 
 procedure UpdateAuthFields(Sender: TObject);
