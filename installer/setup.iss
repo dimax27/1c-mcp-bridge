@@ -512,7 +512,7 @@ begin
   begin
     if LoadStringFromFile(TmpFile, AOutput) then
     begin
-      Output := String(AOutput);
+      Output := UTF8ToString(AOutput);
       MemoTestOutput.Lines.Text := Output;
     end
     else
