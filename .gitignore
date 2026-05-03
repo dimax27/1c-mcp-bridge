@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# Inno Setup output
+dist/
+*.exe.manifest
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Логи и временные файлы инсталлятора
+installer/install.log
+installer/install_params.txt
+installer/test_params.txt
+installer/test_output.txt
+*.bak.*
