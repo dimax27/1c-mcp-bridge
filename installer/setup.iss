@@ -113,7 +113,7 @@ var
   EditServerName:       TNewEdit;
   EditRefName:          TNewEdit;
   EditUser:             TNewEdit;
-  EditPassword:         TNewPasswordEdit;
+  EditPassword:         TNewEdit;
   CheckOSAuth:          TNewCheckBox;
   LblFileBase:          TNewStaticText;
   LblServer, LblRef:    TNewStaticText;
@@ -225,6 +225,7 @@ begin
 end;
 
 procedure UpdateAuthFields(Sender: TObject); forward;
+  procedure TestConnectionClick(Sender: TObject); forward;
 
 procedure CreateConnectionParamsPage;
 var
@@ -318,10 +319,11 @@ begin
   LblPwd.Width := PageConnectionParams.SurfaceWidth;
   Y := Y + LblPwd.Height + 4;
 
-  EditPassword := TNewPasswordEdit.Create(PageConnectionParams);
+  EditPassword := TNewEdit.Create(PageConnectionParams);
   EditPassword.Parent := PageConnectionParams.Surface;
   EditPassword.Top := Y;
   EditPassword.Width := PageConnectionParams.SurfaceWidth;
+  EditPassword.Password := True;
 end;
 
 procedure UpdateAuthFields(Sender: TObject);
@@ -365,7 +367,7 @@ begin
   MemoTestOutput.Top := BtnTest.Top + BtnTest.Height + 12;
   MemoTestOutput.Width := PageTest.SurfaceWidth;
   MemoTestOutput.Height := PageTest.SurfaceHeight - BtnTest.Height - 12;
-  MemoTestOutput.ScrollBars := ssVertical;
+  MemoTestOutput.ScrollBars := 2;
   MemoTestOutput.ReadOnly := True;
   MemoTestOutput.Text := 'Нажмите «Проверить» — установщик попытается подключиться к 1С с введёнными параметрами.' + #13#10 +
                         '(Этот шаг не обязателен, можно пропустить кнопкой «Далее».)';
