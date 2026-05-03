@@ -1,7 +1,7 @@
 # =============================================================================
 #  test_connection.ps1 — пробует подключиться к 1С с заданными параметрами.
-#  Вызывается из Pascal Script кнопкой "Проверить подключение к 1С".
-#  Не зависит от установленного venv: использует системный Python или сразу COM.
+#  Output-файл пишется построчно с самого первого шага, чтобы при любой
+#  ошибке (включая unhandled exception) пользователь видел, докуда дошли.
 # =============================================================================
 
 [CmdletBinding()]
@@ -10,21 +10,33 @@ param(
     [Parameter(Mandatory)] [string]$OutputFile
 )
 
-$ErrorActionPreference = 'Stop'
-
 function Out([string]$line) {
-    Add-Content -Path $OutputFile -Value $line -Encoding UTF8
+    try {
+        Add-Content -Path $OutputFile -Value $line -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        [Console]::Error.WriteLine("FATAL: cannot write to $OutputFile : $_")
+    }
 }
 
-# Очистим output
-Set-Content -Path $OutputFile -Value '' -Encoding UTF8
+# Создаём пустой файл сразу — чтобы Inno Setup мог его прочитать даже при крахе скрипта
+try {
+    Set-Content -Path $OutputFile -Value '' -Encoding UTF8 -ErrorAction Stop
+} catch {
+    [Console]::Error.WriteLine("FATAL: cannot create output file '$OutputFile' : $_")
+    exit 10
+}
+
+Out "=== Тест подключения к 1С ==="
+Out ("PowerShell version: " + $PSVersionTable.PSVersion)
+Out ""
 
 try {
     if (-not (Test-Path $ParamsFile)) {
-        Out "Не найден файл параметров: $ParamsFile"
+        Out "ОШИБКА: Не найден файл параметров: $ParamsFile"
         exit 2
     }
 
+    Out "Читаю параметры..."
     $params = @{}
     foreach ($line in Get-Content $ParamsFile -Encoding UTF8) {
         if ($line -match '^([^=]+)=(.*)$') {
@@ -36,68 +48,85 @@ try {
     $ConnStr = $params['CONNSTR']
     $DllPath = $params['DLLPATH']
 
-    Out "Параметры:"
+    if (-not $ProgID -or -not $ConnStr) {
+        Out "ОШИБКА: пустые PROGID или CONNSTR."
+        exit 3
+    }
+
     Out "  ProgID:  $ProgID"
     $safeConn = $ConnStr -replace 'Pwd="[^"]*"', 'Pwd="***"'
     Out "  ConnStr: $safeConn"
     Out ""
 
-    # Если коннектор не зарегистрирован — попробуем зарегистрировать прямо сейчас
-    # (для теста до полной установки)
-    try {
-        $type = [Type]::GetTypeFromProgID($ProgID, $false)
-        if (-not $type) {
-            Out "ProgID '$ProgID' не зарегистрирован в системе."
-            if ($DllPath -and (Test-Path $DllPath)) {
-                Out "Регистрирую $DllPath ..."
-                $p = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', "`"$DllPath`"") -Wait -PassThru
-                if ($p.ExitCode -ne 0) {
-                    Out "regsvr32 вернул код $($p.ExitCode)."
-                    exit 3
-                }
-                Out "Зарегистрирован."
-            } else {
-                Out "comcntr.dll не найден по пути $DllPath."
-                Out "Регистрация невозможна. Завершаю проверку с ошибкой."
-                exit 4
+    Out "Проверяю регистрацию COM-коннектора..."
+    $type = [Type]::GetTypeFromProgID($ProgID, $false)
+    if (-not $type) {
+        Out "  $ProgID не зарегистрирован."
+        if ($DllPath -and (Test-Path $DllPath)) {
+            Out "  Регистрирую $DllPath..."
+            $p = Start-Process -FilePath 'regsvr32.exe' `
+                               -ArgumentList @('/s', "`"$DllPath`"") `
+                               -Wait -PassThru -ErrorAction Stop
+            if ($p.ExitCode -ne 0) {
+                Out "  regsvr32 вернул код $($p.ExitCode). Нужны права администратора."
+                exit 5
             }
+            Out "  Зарегистрирован."
+            $type = [Type]::GetTypeFromProgID($ProgID, $false)
+            if (-not $type) {
+                Out "  regsvr32 успешен, но ProgID не виден — несовпадение разрядности."
+                exit 6
+            }
+        } else {
+            Out "  comcntr.dll не найден ($DllPath)."
+            Out "  Установщик попробует зарегистрировать его на этапе установки."
+            Out "  Тест пропущен — можно нажимать Далее."
+            exit 0
         }
-
-        Out "Создаю COM-объект $ProgID ..."
-        $connector = [Activator]::CreateInstance([Type]::GetTypeFromProgID($ProgID))
-
-        Out "Подключаюсь к информационной базе ..."
-        $ib = $connector.Connect($ConnStr)
-
-        $name    = $ib.Метаданные.Имя
-        $synonym = $ib.Метаданные.Синоним
-
-        Out ""
-        Out "УСПЕХ"
-        Out "Имя конфигурации: $name"
-        if ($synonym) { Out "Синоним:          $synonym" }
-        Out ""
-        Out "Подключение работает. Можно нажимать «Далее»."
-        exit 0
-
-    } catch {
-        Out ""
-        Out "ОШИБКА ПОДКЛЮЧЕНИЯ:"
-        Out $_.Exception.Message
-        if ($_.Exception.InnerException) {
-            Out ""
-            Out "Inner: $($_.Exception.InnerException.Message)"
-        }
-        Out ""
-        Out "Возможные причины:"
-        Out "  • Неверный адрес сервера или имя ИБ"
-        Out "  • Нет свободной лицензии 1С"
-        Out "  • Учётка не имеет прав на эту базу"
-        Out "  • Брандмауэр блокирует порт сервера 1С"
-        exit 5
+    } else {
+        Out "  OK — зарегистрирован."
     }
+    Out ""
+
+    Out "Создаю COM-объект..."
+    $connector = [Activator]::CreateInstance($type)
+    Out "  OK"
+
+    Out "Подключаюсь к информационной базе..."
+    $ib = $connector.Connect($ConnStr)
+    Out "  OK"
+    Out ""
+
+    Out "Читаю метаданные..."
+    $name    = try { $ib.Метаданные.Имя }     catch { $null }
+    $synonym = try { $ib.Метаданные.Синоним } catch { $null }
+
+    Out ""
+    Out "═══════════════════════════════════════════════"
+    Out "  УСПЕХ — подключение работает"
+    Out "═══════════════════════════════════════════════"
+    if ($name)    { Out "Имя конфигурации: $name" }
+    if ($synonym) { Out "Синоним:          $synonym" }
+    Out ""
+    Out "Можно нажимать «Далее»."
+    exit 0
 
 } catch {
-    Out "Внутренняя ошибка теста: $($_.Exception.Message)"
-    exit 99
+    Out ""
+    Out "═══════════════════════════════════════════════"
+    Out "  ОШИБКА"
+    Out "═══════════════════════════════════════════════"
+    Out $_.Exception.Message
+    if ($_.Exception.InnerException) {
+        Out ""
+        Out "Inner: $($_.Exception.InnerException.Message)"
+    }
+    Out ""
+    Out "Возможные причины:"
+    Out "  - Неверный адрес сервера или имя ИБ"
+    Out "  - Нет свободной клиентской лицензии 1С"
+    Out "  - У учётки нет прав на эту базу"
+    Out "  - Брандмауэр блокирует порт сервера 1С (1541)"
+    Out "  - Несовпадение версии COM-коннектора и сервера"
+    exit 7
 }
