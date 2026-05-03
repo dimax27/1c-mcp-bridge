@@ -15,6 +15,8 @@
 #if MyAppVersion == ""
   #define MyAppVersion "0.1.0-dev"
 #endif
+; Числовая часть версии (Inno Setup VersionInfoVersion не принимает суффиксы вроде -beta)
+#define NumericPart Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher   "Koovykin D."
 #define MyAppCopyright   "Copyright (C) 2026 Koovykin D."
 #define MyAppURL         "https://github.com/REPLACE_ME/1c-mcp-bridge"
@@ -34,12 +36,12 @@ AppUpdatesURL={#MyAppURL}/releases
 AppCopyright={#MyAppCopyright}
 AppContact=Koovykin D.
 AppComments=MCP-сервер для подключения Claude Desktop к 1С:Предприятию через COM-коннектор
-VersionInfoVersion={#MyAppVersion}.0
+VersionInfoVersion={#NumericPart}.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoCopyright={#MyAppCopyright}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#MyAppVersion}.0
+VersionInfoProductVersion={#NumericPart}.0
 DefaultDirName={autopf}\{#MyAppNameSafe}
 DefaultGroupName={#MyAppName}
 LicenseFile=..\LICENSE
