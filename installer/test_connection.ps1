@@ -105,9 +105,22 @@ try {
     $connector = [Activator]::CreateInstance($type)
     Out "  OK"
 
-    Out "Подключаюсь к информационной базе..."
-    $ib = $connector.Connect($ConnStr)
-    Out "  OK"
+    Out "Подключаюсь к информационной базе (таймаут 30 сек)..."
+    $job = Start-Job -ScriptBlock {
+        param($p, $cs)
+        $cn = [Activator]::CreateInstance([Type]::GetTypeFromProgID($p))
+        $cn.Connect($cs)
+    } -ArgumentList $ProgID, $ConnStr
+
+    if (Wait-Job $job -Timeout 30) {
+        $ib = Receive-Job $job
+        Remove-Job $job
+        if (-not $ib) { throw "Connect вернул null" }
+        Out "  OK"
+    } else {
+        Stop-Job $job -PassThru | Remove-Job -Force
+        throw "Таймаут 30 секунд при подключении к 1С. Возможные причины: сервер 192.168.0.35 недоступен, нет свободной лицензии, антивирус блокирует COM-вызовы."
+    }
     Out ""
 
     Out "Читаю метаданные..."
