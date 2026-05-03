@@ -16,7 +16,7 @@
   #define MyAppVersion "0.1.0-dev"
 #endif
 #define MyAppPublisher   "Open Source"
-#define MyAppURL         "https://github.com/dimax27/1c-mcp-bridge"
+#define MyAppURL         "https://github.com/REPLACE_ME/1c-mcp-bridge"
 #define MyAppExeName     "mcp_server_1c.py"
 #define PythonVersion    "3.12.7"
 #define PythonInstaller  "python-" + PythonVersion + "-amd64.exe"
@@ -127,51 +127,95 @@ var
   TestPassed:           Boolean;
 
 // ----------------------------------------------------------------------------
-//  Сканирование реестра на установленные платформы 1С
+//  Сканирование установленных платформ 1С
+//  Стратегия: сначала реестр (HKLM/HKCU, обычные и Wow6432Node ветки),
+//  затем fallback по файловой системе для нестандартных установок (sccm,
+//  ручное копирование, корпоративный deploy без записи в реестр).
 // ----------------------------------------------------------------------------
-procedure DetectPlatforms;
+procedure AddPlatform(Version, InstallPath: String);
 var
-  RootKey:     Integer;
-  ParentPath:  String;
-  Subkeys:     TArrayOfString;
-  i, n:        Integer;
-  Ver, Path:   String;
-  Major:       Integer;
-  Info:        TPlatformInfo;
+  Major: Integer;
+  Info:  TPlatformInfo;
+  i:     Integer;
+  Parts: TArrayOfString;
+begin
+  // Major-версия "8.5.1.1150" -> 85, "8.3.27.1859" -> 83
+  if (Length(Version) < 3) or (Version[1] <> '8') then Exit;
+  Major := StrToIntDef(Version[1] + Version[3], 0);
+  if Major < 82 then Exit;
+
+  // Дедупликация — могла прийти и из реестра, и с файловой системы
+  for i := 0 to GetArrayLength(Platforms) - 1 do
+    if Platforms[i].Version = Version then Exit;
+
+  Info.Version     := Version;
+  Info.InstallPath := InstallPath;
+  Info.ProgID      := 'V' + IntToStr(Major) + '.COMConnector';
+  Info.Bitness     := 'x64';
+  SetArrayLength(Platforms, GetArrayLength(Platforms) + 1);
+  Platforms[GetArrayLength(Platforms) - 1] := Info;
+end;
+
+procedure ScanRegistryBranch(RootKey: Integer; SubKey: String);
+var
+  Subkeys:    TArrayOfString;
+  i, n:       Integer;
+  Ver, Path:  String;
+begin
+  if not RegGetSubkeyNames(RootKey, SubKey, Subkeys) then Exit;
+  n := GetArrayLength(Subkeys);
+  for i := 0 to n - 1 do
+  begin
+    Ver  := Subkeys[i];
+    Path := '';
+    RegQueryStringValue(RootKey, SubKey + '\' + Ver, 'InstalledLocation', Path);
+    if Path = '' then
+      RegQueryStringValue(RootKey, SubKey + '\' + Ver, 'Path', Path);
+    AddPlatform(Ver, Path);
+  end;
+end;
+
+procedure ScanFolderForPlatforms(Folder: String);
+var
+  FindRec: TFindRec;
+  Sub:     String;
+  DllPath: String;
+begin
+  if not DirExists(Folder) then Exit;
+  if FindFirst(Folder + '\*', FindRec) then
+  begin
+    try
+      repeat
+        Sub := FindRec.Name;
+        if (Sub <> '.') and (Sub <> '..') and
+           ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) then
+        begin
+          DllPath := Folder + '\' + Sub + '\bin\comcntr.dll';
+          if FileExists(DllPath) then
+            AddPlatform(Sub, Folder + '\' + Sub);
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure DetectPlatforms;
 begin
   SetArrayLength(Platforms, 0);
 
-  // 1С пишется в HKLM\SOFTWARE\1C\1Cv8\<version>\... — для x64-системы оба варианта,
-  // включая Wow6432Node, на всякий случай.
-  RootKey := HKEY_LOCAL_MACHINE;
+  // 1. Реестр — HKLM и HKCU, обычные и Wow6432Node ветки
+  ScanRegistryBranch(HKEY_LOCAL_MACHINE, 'SOFTWARE\1C\1Cv8');
+  ScanRegistryBranch(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\1C\1Cv8');
+  ScanRegistryBranch(HKEY_CURRENT_USER,  'SOFTWARE\1C\1Cv8');
+  ScanRegistryBranch(HKEY_CURRENT_USER,  'SOFTWARE\WOW6432Node\1C\1Cv8');
 
-  if RegGetSubkeyNames(RootKey, 'SOFTWARE\1C\1Cv8', Subkeys) then
-  begin
-    n := GetArrayLength(Subkeys);
-    for i := 0 to n - 1 do
-    begin
-      Ver  := Subkeys[i];
-      Path := '';
-      RegQueryStringValue(RootKey, 'SOFTWARE\1C\1Cv8\' + Ver, 'InstalledLocation', Path);
-      if Path = '' then
-        RegQueryStringValue(RootKey, 'SOFTWARE\1C\1Cv8\' + Ver, 'Path', Path);
-
-      // Major-версия: "8.3.24.1234" -> 83, "8.5.1.1150" -> 85
-      if (Length(Ver) >= 3) and (Ver[1] = '8') then
-      begin
-        Major := StrToIntDef(Ver[1] + Ver[3], 0);
-        if Major >= 82 then
-        begin
-          Info.Version     := Ver;
-          Info.InstallPath := Path;
-          Info.ProgID      := 'V' + IntToStr(Major) + '.COMConnector';
-          Info.Bitness     := 'x64'; // эвристика — рассмотрим только 64-битные ветки
-          SetArrayLength(Platforms, GetArrayLength(Platforms) + 1);
-          Platforms[GetArrayLength(Platforms) - 1] := Info;
-        end;
-      end;
-    end;
-  end;
+  // 2. Файловая система — стандартные пути установки
+  ScanFolderForPlatforms(ExpandConstant('{commonpf64}') + '\1cv8');
+  ScanFolderForPlatforms(ExpandConstant('{commonpf32}') + '\1cv8');
+  ScanFolderForPlatforms('C:\Program Files\1cv8');
+  ScanFolderForPlatforms('C:\Program Files (x86)\1cv8');
 end;
 
 // ----------------------------------------------------------------------------
@@ -188,7 +232,7 @@ begin
       'Платформа 1С:Предприятие',
       'Платформа 1С на компьютере не обнаружена',
       'Установщик не нашёл зарегистрированных версий 1С:Предприятия. ' +
-      'Без установленной платформы COM-коннектор не сможет подключиться к информационной базе.' + #13#10 + #13#10 +
+      'Без установленной платформы COM-коннектор не сможет подключиться к информационной базе.' + #13#10 + #13#10 + #13#10 +
       'Вы можете продолжить установку, но перед использованием потребуется установить платформу 1С 8.2 или новее.',
       False, False);
     PagePlatform.Add('Продолжить без установленной 1С');
