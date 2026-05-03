@@ -487,8 +487,8 @@ begin
     Exit;
   end;
 
-  // Параметры в файл — чтобы не возиться с экранированием на cmd-line
-  SaveStringToFile(ParamsFile,
+  // Параметры в файл, UTF-8 с BOM — чтобы Get-Content в PS5 правильно прочитал кириллицу
+  SaveStringToUTF8File(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
     'DLLPATH=' + GetSelectedDllPath + #13#10, False);

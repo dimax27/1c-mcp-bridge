@@ -1,7 +1,6 @@
-# =============================================================================
+﻿# =============================================================================
 #  test_connection.ps1 — пробует подключиться к 1С с заданными параметрами.
-#  Output-файл пишется построчно с самого первого шага, чтобы при любой
-#  ошибке (включая unhandled exception) пользователь видел, докуда дошли.
+#  Совместим с Windows PowerShell 5.1 (try/catch только как statement, не expr).
 # =============================================================================
 
 [CmdletBinding()]
@@ -14,15 +13,15 @@ function Out([string]$line) {
     try {
         Add-Content -Path $OutputFile -Value $line -Encoding UTF8 -ErrorAction Stop
     } catch {
-        [Console]::Error.WriteLine("FATAL: cannot write to $OutputFile : $_")
+        [Console]::Error.WriteLine("FATAL: cannot write to ${OutputFile}: $_")
     }
 }
 
-# Создаём пустой файл сразу — чтобы Inno Setup мог его прочитать даже при крахе скрипта
+# Создаём пустой файл сразу
 try {
     Set-Content -Path $OutputFile -Value '' -Encoding UTF8 -ErrorAction Stop
 } catch {
-    [Console]::Error.WriteLine("FATAL: cannot create output file '$OutputFile' : $_")
+    [Console]::Error.WriteLine("FATAL: cannot create ${OutputFile}: $_")
     exit 10
 }
 
@@ -98,24 +97,34 @@ try {
     Out ""
 
     Out "Читаю метаданные..."
-    $name    = try { $ib.Метаданные.Имя }     catch { $null }
-    $synonym = try { $ib.Метаданные.Синоним } catch { $null }
+    $name = $null
+    $synonym = $null
+    try {
+        $name = $ib.Метаданные.Имя
+    } catch {
+        Out "  Не удалось прочитать Метаданные.Имя: $($_.Exception.Message)"
+    }
+    try {
+        $synonym = $ib.Метаданные.Синоним
+    } catch {
+        # некритично
+    }
 
     Out ""
-    Out "═══════════════════════════════════════════════"
+    Out "==============================================="
     Out "  УСПЕХ — подключение работает"
-    Out "═══════════════════════════════════════════════"
+    Out "==============================================="
     if ($name)    { Out "Имя конфигурации: $name" }
     if ($synonym) { Out "Синоним:          $synonym" }
     Out ""
-    Out "Можно нажимать «Далее»."
+    Out "Можно нажимать Далее."
     exit 0
 
 } catch {
     Out ""
-    Out "═══════════════════════════════════════════════"
+    Out "==============================================="
     Out "  ОШИБКА"
-    Out "═══════════════════════════════════════════════"
+    Out "==============================================="
     Out $_.Exception.Message
     if ($_.Exception.InnerException) {
         Out ""
