@@ -17,9 +17,6 @@ param()
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
-# Старые Windows/PS5 по умолчанию используют TLS 1.0/1.1, python.org требует 1.2+
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-
 # Лог пишем рядом с инсталлером — потом удобно дебажить
 $LogPath = Join-Path $PSScriptRoot 'install.log'
 function Log {
@@ -28,16 +25,33 @@ function Log {
     "$ts  $Message" | Tee-Object -FilePath $LogPath -Append | Out-Host
 }
 
+# Крупный заголовок этапа — чтобы пользователь видел что сейчас делается
+$script:StageNum = 0
+function Stage {
+    param([string]$Title)
+    $script:StageNum++
+    $bar = "=" * 70
+    Write-Host ""
+    Write-Host $bar -ForegroundColor Cyan
+    Write-Host (" Этап {0} : {1}" -f $script:StageNum, $Title) -ForegroundColor Cyan
+    Write-Host $bar -ForegroundColor Cyan
+    Log "[Этап $script:StageNum] $Title"
+}
+
 trap {
     Log ("ОШИБКА: " + $_.Exception.Message)
     Log ($_.ScriptStackTrace)
+    Write-Host ""
+    Write-Host "ОШИБКА: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Окно закроется через 30 секунд. Можно сфотографировать ошибку." -ForegroundColor Yellow
+    Start-Sleep -Seconds 30
     exit 1
 }
 
 Log "Запуск install.ps1"
 
 # -----------------------------------------------------------------------------
-# 1. Параметры
+Stage "Чтение параметров мастера"
 # -----------------------------------------------------------------------------
 $ParamsFile = Join-Path $PSScriptRoot 'install_params.txt'
 if (-not (Test-Path $ParamsFile)) {
@@ -64,8 +78,9 @@ Log "AppDir       = $AppDir"
 Log "UserAppData  = $UserAppData"
 
 # -----------------------------------------------------------------------------
-# 2. Python 3.12 — ищем готовый, иначе ставим
+# 2. Python
 # -----------------------------------------------------------------------------
+Stage "Поиск/установка Python 3.12"
 function Find-Python312 {
     # Пробуем py-launcher
     try {
@@ -119,6 +134,7 @@ Log "Python: $PythonExe"
 # -----------------------------------------------------------------------------
 # 3. venv
 # -----------------------------------------------------------------------------
+Stage "Создание изолированной Python-среды (venv)"
 $VenvDir = Join-Path $AppDir '.venv'
 if (Test-Path $VenvDir) {
     Log "Удаляю старый venv..."
@@ -133,6 +149,7 @@ $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 # -----------------------------------------------------------------------------
 # 4. Зависимости
 # -----------------------------------------------------------------------------
+Stage "Установка Python-зависимостей (pywin32, mcp)"
 Log "Обновляю pip..."
 & $VenvPython -m pip install --upgrade pip 2>&1 | Tee-Object -FilePath $LogPath -Append
 
@@ -144,6 +161,7 @@ if ($LASTEXITCODE -ne 0) { throw "pip install вернул $LASTEXITCODE" }
 # -----------------------------------------------------------------------------
 # 5. Регистрация COM-коннектора
 # -----------------------------------------------------------------------------
+Stage "Регистрация COM-коннектора 1С (это может занять 1-2 минуты)"
 if ($DllPath -and (Test-Path $DllPath)) {
     Log "Регистрирую $DllPath..."
     $proc = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', "`"$DllPath`"") -Wait -PassThru
@@ -162,17 +180,32 @@ if ($DllPath -and (Test-Path $DllPath)) {
     $binDir = Split-Path $DllPath -Parent
     if (Test-Path $binDir) {
         Log "Регистрирую остальные DLL из $binDir (для type-libraries)..."
-        $count = 0
-        Get-ChildItem $binDir -Filter '*.dll' -ErrorAction SilentlyContinue | ForEach-Object {
-            # comcntr уже сделан выше — пропускаем
-            if ($_.Name -ieq 'comcntr.dll') { return }
-            # /s - silent, /i - вызов DllInstall если есть
-            Start-Process -FilePath 'regsvr32.exe' `
-                          -ArgumentList @('/s', "`"$($_.FullName)`"") `
-                          -Wait -PassThru -ErrorAction SilentlyContinue | Out-Null
-            $count++
+        $dlls = Get-ChildItem $binDir -Filter '*.dll' -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ine 'comcntr.dll' }
+        $total = $dlls.Count
+        Log "Найдено DLL для регистрации: $total"
+        Write-Host ""
+        Write-Host "=== Регистрирую $total DLL параллельно (потоков: 8) ===" -ForegroundColor Cyan
+
+        # Параллельно через стандартный ThreadJob/Job pool — но в PS5 через runspace pool
+        # Простой и надёжный способ: батчами по 8, не блокируя UI
+        $batchSize = 8
+        $processed = 0
+        for ($i = 0; $i -lt $total; $i += $batchSize) {
+            $batch = $dlls[$i..([Math]::Min($i + $batchSize - 1, $total - 1))]
+            $procs = @()
+            foreach ($dll in $batch) {
+                $procs += Start-Process -FilePath 'regsvr32.exe' `
+                                         -ArgumentList @('/s', "`"$($dll.FullName)`"") `
+                                         -PassThru -WindowStyle Hidden
+            }
+            $procs | Wait-Process -ErrorAction SilentlyContinue
+            $processed += $batch.Count
+            $percent = [Math]::Round(100 * $processed / $total)
+            Write-Host ("  [{0,3}%] {1} / {2}" -f $percent, $processed, $total)
         }
-        Log "Обработано DLL: $count (часть из них не COM — это нормально)."
+        Write-Host ""
+        Log "Обработано DLL: $processed (часть из них не COM — это нормально)."
     }
 } else {
     Log "Путь к comcntr.dll не задан или не существует ($DllPath). Пропускаю regsvr32."
@@ -182,6 +215,7 @@ if ($DllPath -and (Test-Path $DllPath)) {
 # -----------------------------------------------------------------------------
 # 6. databases.json — генерируем на основе параметров мастера
 # -----------------------------------------------------------------------------
+Stage "Создание databases.json"
 $DatabasesFile = Join-Path $AppDir 'databases.json'
 $DbKey  = $params['DBKEY']
 $DbDesc = $params['DBDESC']
@@ -228,6 +262,7 @@ Log "Записан $DatabasesFile (база '$DbKey')"
 # -----------------------------------------------------------------------------
 # 7. claude_desktop_config.json
 # -----------------------------------------------------------------------------
+Stage "Конфигурирование Claude Desktop"
 $ClaudeDir    = Join-Path $UserAppData 'Claude'
 $ConfigPath   = Join-Path $ClaudeDir 'claude_desktop_config.json'
 
@@ -274,5 +309,14 @@ $json = $config | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))
 Log "Конфиг обновлён: $ConfigPath"
 
+# -----------------------------------------------------------------------------
+$bar = "=" * 70
+Write-Host ""
+Write-Host $bar -ForegroundColor Green
+Write-Host "  УСТАНОВКА ЗАВЕРШЕНА УСПЕШНО" -ForegroundColor Green
+Write-Host $bar -ForegroundColor Green
+Write-Host ""
+Write-Host "Окно закроется автоматически через 5 секунд." -ForegroundColor Yellow
 Log "Установка завершена успешно."
+Start-Sleep -Seconds 5
 exit 0

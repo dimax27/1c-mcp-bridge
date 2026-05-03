@@ -15,11 +15,9 @@
 #if MyAppVersion == ""
   #define MyAppVersion "0.1.0-dev"
 #endif
-; Числовая часть версии (Inno Setup VersionInfoVersion не принимает суффиксы вроде -beta)
-#define NumericPart Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher   "Koovykin D."
 #define MyAppCopyright   "Copyright (C) 2026 Koovykin D."
-#define MyAppURL         "https://github.com/dimax27/1c-mcp-bridge"
+#define MyAppURL         "https://github.com/REPLACE_ME/1c-mcp-bridge"
 #define MyAppExeName     "mcp_server_1c.py"
 #define PythonVersion    "3.12.7"
 #define PythonInstaller  "python-" + PythonVersion + "-amd64.exe"
@@ -36,12 +34,12 @@ AppUpdatesURL={#MyAppURL}/releases
 AppCopyright={#MyAppCopyright}
 AppContact=Koovykin D.
 AppComments=MCP-сервер для подключения Claude Desktop к 1С:Предприятию через COM-коннектор
-VersionInfoVersion={#NumericPart}.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoCopyright={#MyAppCopyright}
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#NumericPart}.0
+VersionInfoProductVersion={#MyAppVersion}.0
 DefaultDirName={autopf}\{#MyAppNameSafe}
 DefaultGroupName={#MyAppName}
 LicenseFile=..\LICENSE
@@ -95,11 +93,11 @@ Name: "{group}\Документация";            Filename: "{#MyAppURL}"
 
 [Run]
 ; Финальная установка: Python (если нет), venv, зависимости, регистрация коннектора, конфиг Claude.
-; Параметры передаются через переменные окружения, которые мы выставляем в [Code].
+; Окно PowerShell специально не скрываем — пользователь видит прогресс этапов.
 Filename: "powershell.exe"; \
   Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\installer\install.ps1"""; \
-  Flags: runhidden waituntilterminated; \
-  StatusMsg: "Устанавливаю Python и зависимости, регистрирую COM-коннектор, прописываю конфиг Claude Desktop..."
+  Flags: waituntilterminated; \
+  StatusMsg: "Запускаю установку — следите за прогрессом в окне PowerShell..."
 
 [UninstallRun]
 Filename: "powershell.exe"; \
@@ -543,7 +541,7 @@ begin
   end;
 
   // Параметры в файл, UTF-8 с BOM — чтобы Get-Content в PS5 правильно прочитал кириллицу
-  SaveStringToFile(ParamsFile,
+  SaveStringToUTF8File(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
     'DLLPATH=' + GetSelectedDllPath + #13#10, False);
