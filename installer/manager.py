@@ -112,7 +112,11 @@ def find_platforms() -> list[dict]:
             if not d.is_dir():
                 continue
             dll = d / "bin" / "comcntr.dll"
-            if not dll.exists():
+            try:
+                if not dll.exists():
+                    continue
+            except (PermissionError, OSError):
+                # Нет прав читать атрибуты — пропускаем эту версию
                 continue
             version = d.name
             parts = version.split(".")
