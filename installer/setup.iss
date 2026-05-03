@@ -414,6 +414,7 @@ procedure TestConnectionClick(Sender: TObject);
 var
   ResultCode: Integer;
   TmpFile, Cmd, Output: String;
+  AOutput: AnsiString;
 begin
   MemoTestOutput.Lines.Clear;
   MemoTestOutput.Lines.Add('Запускаю проверку...');
@@ -433,7 +434,7 @@ begin
 
   if Exec('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    LoadStringFromFileInUTF8(TmpFile, Output);
+    LoadStringFromFile(TmpFile, AOutput); Output := String(AOutput);
     MemoTestOutput.Lines.Text := Output;
     TestPassed := (ResultCode = 0);
   end
