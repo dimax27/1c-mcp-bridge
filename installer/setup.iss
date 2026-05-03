@@ -1,4 +1,4 @@
-﻿; =============================================================================
+; =============================================================================
 ;  1C MCP Bridge — установщик
 ;  Связывает Claude Desktop с 1С:Предприятием через COM-коннектор и MCP.
 ;
@@ -499,7 +499,7 @@ begin
   end;
 
   // Параметры в файл, UTF-8 с BOM — чтобы Get-Content в PS5 правильно прочитал кириллицу
-  SaveStringToUTF8File(ParamsFile,
+  SaveStringToFile(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
     'DLLPATH=' + GetSelectedDllPath + #13#10, False);
