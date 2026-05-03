@@ -1,22 +1,38 @@
 """
-MCP-сервер для подключения Claude к базе 1С 8.2 (Управление торговлей 10.3).
+1C MCP Bridge — сервер MCP для подключения Claude к 1С:Предприятию через COM.
 
-Архитектура: Claude Desktop запускает этот скрипт через stdio. Инструменты,
-зарегистрированные через FastMCP, вызываются по протоколу MCP (JSON-RPC поверх
-stdio). Сервер держит COM-соединение с информационной базой через V82.COMConnector.
+v0.2.0: поддержка нескольких информационных баз. Список баз хранится в
+databases.json (рядом с этим скриптом или в пути, заданном переменной
+ONEC_DATABASES_FILE). Каждый из четырёх инструментов принимает опциональный
+параметр `database` — ключ из списка. При отсутствии параметра используется
+default_database из конфига.
 
-Конфигурация — через переменные окружения. См. .env.example и README.md.
+Формат databases.json:
+{
+    "version": 1,
+    "default_database": "ut",
+    "databases": {
+        "ut": {
+            "description": "Управление торговлей 10.3",
+            "progid": "V83.COMConnector",
+            "connection_string": "Srvr=\"127.0.0.1\";Ref=\"ut10\""
+        },
+        ...
+    }
+}
 """
 
 from __future__ import annotations
 
 import datetime
 import io
+import json
 import logging
 import os
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import pythoncom
@@ -25,7 +41,7 @@ import win32com.client
 from mcp.server.fastmcp import FastMCP
 
 # На Windows stdout/stderr по умолчанию в cp1251 — Claude Desktop пишет лог в
-# UTF-8 и ломается на кириллице. Принудительно перекодируем оба потока.
+# UTF-8. Принудительно перекодируем.
 if sys.platform == "win32":
     try:
         sys.stdout = io.TextIOWrapper(
@@ -35,10 +51,8 @@ if sys.platform == "win32":
             sys.stderr.buffer, encoding="utf-8", line_buffering=True
         )
     except (AttributeError, ValueError):
-        # Если потоки уже обёрнуты (тесты и т.п.) — пропускаем
         pass
 
-# Логи направляем в stderr — stdout занят протоколом MCP (JSON-RPC).
 logging.basicConfig(
     level=os.environ.get("ONEC_LOG_LEVEL", "INFO"),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -47,47 +61,111 @@ logging.basicConfig(
 log = logging.getLogger("mcp-1c")
 
 # ---------------------------------------------------------------------------
-# Конфигурация
+# Загрузка списка баз
 # ---------------------------------------------------------------------------
-
-CONN_STRING = os.environ.get("ONEC_CONNECTION_STRING", "").strip()
-
-# Альтернатива — собрать строку из частей.
-ONEC_MODE = os.environ.get("ONEC_MODE", "").lower()      # "file" | "server"
-ONEC_FILE = os.environ.get("ONEC_FILE_PATH", "")
-ONEC_SRVR = os.environ.get("ONEC_SERVER", "")
-ONEC_REF = os.environ.get("ONEC_REF", "")
-ONEC_USER = os.environ.get("ONEC_USER", "")
-ONEC_PWD = os.environ.get("ONEC_PASSWORD", "")
 
 DEFAULT_LIMIT = int(os.environ.get("ONEC_DEFAULT_LIMIT", "1000"))
 HARD_LIMIT = int(os.environ.get("ONEC_HARD_LIMIT", "10000"))
-COM_PROGID = os.environ.get("ONEC_COMCONNECTOR_PROGID", "V82.COMConnector")
 
 
-def build_connection_string() -> str:
-    if CONN_STRING:
-        return CONN_STRING
-    if ONEC_MODE == "file":
-        return f'File="{ONEC_FILE}";Usr="{ONEC_USER}";Pwd="{ONEC_PWD}"'
-    if ONEC_MODE == "server":
-        return (
-            f'Srvr="{ONEC_SRVR}";Ref="{ONEC_REF}";'
-            f'Usr="{ONEC_USER}";Pwd="{ONEC_PWD}"'
+def find_databases_file() -> Path:
+    """Ищем databases.json: ONEC_DATABASES_FILE → рядом со скриптом → CWD."""
+    env_path = os.environ.get("ONEC_DATABASES_FILE", "").strip()
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parent / "databases.json"
+
+
+def load_databases() -> dict:
+    """Читает и валидирует databases.json. Возвращает словарь с ключами:
+    'default_database': str
+    'databases': {key: {description, progid, connection_string, dll_path?}}
+    """
+    path = find_databases_file()
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Не найден файл со списком баз: {path}\n"
+            f"Создайте его или укажите путь в переменной ONEC_DATABASES_FILE."
         )
-    raise RuntimeError(
-        "Не задана конфигурация подключения. Установите ONEC_CONNECTION_STRING "
-        "или (ONEC_MODE=file|server + соответствующие переменные)."
-    )
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Ошибка JSON в {path}: {e}")
+
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{path}: ожидался объект на верхнем уровне")
+
+    databases = data.get("databases")
+    if not isinstance(databases, dict) or not databases:
+        raise RuntimeError(f"{path}: пустой или отсутствует ключ 'databases'")
+
+    # Валидация каждой базы
+    for key, cfg in databases.items():
+        if not isinstance(cfg, dict):
+            raise RuntimeError(f"databases.{key}: должна быть объектом")
+        for required in ("progid", "connection_string"):
+            if not cfg.get(required):
+                raise RuntimeError(
+                    f"databases.{key}: отсутствует обязательное поле '{required}'"
+                )
+        # Описание короткое, notes — длинное (что в этой базе можно найти)
+        cfg.setdefault("description", key)
+        cfg.setdefault("notes", "")
+
+    default_db = data.get("default_database") or next(iter(databases))
+    if default_db not in databases:
+        raise RuntimeError(
+            f"default_database '{default_db}' не найдена в списке баз"
+        )
+
+    return {
+        "default_database": default_db,
+        "databases": databases,
+    }
+
+
+# Загружаем единожды при старте; перечитывать на лету не будем — переустановка
+# всё равно требует перезапуска Claude Desktop.
+try:
+    DB_CONFIG = load_databases()
+except Exception as e:
+    log.error("Не удалось загрузить databases.json: %s", e)
+    log.error("Сервер запускается, но все вызовы инструментов будут падать.")
+    DB_CONFIG = {"default_database": "", "databases": {}}
+
+
+def list_database_keys() -> list[str]:
+    return list(DB_CONFIG["databases"].keys())
+
+
+def get_db_descriptions() -> str:
+    """Полное описание баз для подсказки Claude в tools/list.
+    Включает короткое description и длинные notes (если есть) — Claude
+    увидит заметки до того как пользователь задаст вопрос, и сможет
+    осознанно выбирать в какую базу обращаться.
+    """
+    if not DB_CONFIG["databases"]:
+        return "(нет настроенных баз)"
+    lines = ["Настроенные базы данных:"]
+    default = DB_CONFIG["default_database"]
+    for key, cfg in DB_CONFIG["databases"].items():
+        marker = " [по умолчанию]" if key == default else ""
+        lines.append(f"\n  • '{key}'{marker}: {cfg['description']}")
+        notes = cfg.get("notes", "").strip()
+        if notes:
+            # Каждая строка заметок с отступом
+            for note_line in notes.splitlines():
+                lines.append(f"      {note_line}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
-# Управление COM (потокобезопасно)
+# Управление COM-соединениями
 # ---------------------------------------------------------------------------
 #
-# FastMCP может выполнять синхронные обработчики в нескольких потоках executor'а.
-# COM-объекты привязаны к потоку (STA), поэтому держим CoInitialize и connection
-# в thread-local. На практике пул редко превышает 1–2 потока.
+# Для каждой базы держим живое соединение в thread-local словаре. COM-объекты
+# привязаны к потоку (STA), поэтому индексируем по (thread_id, db_key).
 
 _tls = threading.local()
 
@@ -98,33 +176,67 @@ def _ensure_com() -> None:
         _tls.com_init = True
 
 
-def get_connection() -> Any:
+def get_connection(db_key: str) -> Any:
+    """Возвращает живое COM-соединение к базе db_key. Лениво создаёт."""
     _ensure_com()
-    conn = getattr(_tls, "connection", None)
+
+    if not hasattr(_tls, "connections"):
+        _tls.connections = {}
+
+    conn = _tls.connections.get(db_key)
     if conn is not None:
-        # Простая проверка живости.
+        # Проверка живости
         try:
             _ = conn.Метаданные.Имя
             return conn
         except pywintypes.com_error:
-            log.warning("COM-соединение умерло, переподключаюсь")
-            _tls.connection = None
-    log.info("Создаю COM-соединение к 1С (%s)", COM_PROGID)
-    connector = win32com.client.Dispatch(COM_PROGID)
-    _tls.connection = connector.Connect(build_connection_string())
-    log.info("Соединение установлено: ИБ %s", _tls.connection.Метаданные.Имя)
-    return _tls.connection
+            log.warning("Соединение к %s умерло, переподключаюсь", db_key)
+            _tls.connections.pop(db_key, None)
+
+    if db_key not in DB_CONFIG["databases"]:
+        raise ValueError(
+            f"База '{db_key}' не настроена. Доступные: {list_database_keys()}"
+        )
+
+    cfg = DB_CONFIG["databases"][db_key]
+    progid = cfg["progid"]
+    conn_str = cfg["connection_string"]
+
+    log.info("Подключаюсь к '%s' через %s", db_key, progid)
+    connector = win32com.client.Dispatch(progid)
+    conn = connector.Connect(conn_str)
+    _tls.connections[db_key] = conn
+
+    try:
+        log.info("Подключение к '%s' установлено: ИБ %s",
+                 db_key, conn.Метаданные.Имя)
+    except pywintypes.com_error:
+        log.info("Подключение к '%s' установлено", db_key)
+
+    return conn
+
+
+def resolve_database(db_param: str | None) -> str:
+    """Возвращает ключ базы. None → default_database. Невалидный → ошибка."""
+    if not db_param:
+        if not DB_CONFIG["default_database"]:
+            raise ValueError("Нет настроенных баз — заполните databases.json")
+        return DB_CONFIG["default_database"]
+    if db_param not in DB_CONFIG["databases"]:
+        raise ValueError(
+            f"База '{db_param}' не настроена. Доступные: {list_database_keys()}"
+        )
+    return db_param
 
 
 # ---------------------------------------------------------------------------
-# Сериализация значений
+# Сериализация значений (без изменений из v0.1.0)
 # ---------------------------------------------------------------------------
 
 EMPTY_DATE_YEAR = 1900
 
 
 def serialize_value(v: Any, depth: int = 0) -> Any:
-    """Превращает COM-значение в JSON-совместимое."""
     if v is None:
         return None
     if isinstance(v, bool):
@@ -143,13 +255,11 @@ def serialize_value(v: Any, depth: int = 0) -> Any:
             return None if d.year < EMPTY_DATE_YEAR else d.isoformat()
         except Exception:
             return str(v)
-    # Дальше идут объекты 1С: ссылки, перечисления и пр.
     if depth > 1:
         try:
             return str(v)
         except Exception:
             return f"<COM:{type(v).__name__}>"
-    # Ссылка на справочник/документ?
     try:
         uuid = str(v.УникальныйИдентификатор())
         try:
@@ -167,7 +277,6 @@ def serialize_value(v: Any, depth: int = 0) -> Any:
         }
     except (AttributeError, pywintypes.com_error):
         pass
-    # Значение перечисления?
     try:
         type_name = str(v.Метаданные().ПолноеИмя())
         return {"_enum": type_name, "_value": str(v)}
@@ -180,11 +289,9 @@ def serialize_value(v: Any, depth: int = 0) -> Any:
 
 
 def parse_parameter(value: Any, conn: Any) -> Any:
-    """JSON-значение -> тип, понятный 1С."""
     if isinstance(value, dict) and "_ref" in value and "_type" in value:
         return get_ref_by_uuid(conn, value["_type"], value["_ref"])
     if isinstance(value, str):
-        # Пытаемся распознать ISO-дату.
         v = value.strip()
         try:
             if len(v) == 10 and v[4] == "-" and v[7] == "-":
@@ -203,7 +310,6 @@ def parse_parameter(value: Any, conn: Any) -> Any:
 
 
 def get_ref_by_uuid(conn: Any, type_path: str, uuid_str: str) -> Any:
-    """'Справочник.Контрагенты' + UUID -> ссылка на объект."""
     parts = type_path.split(".")
     if len(parts) != 2:
         raise ValueError(f"Неверный формат типа: {type_path!r}")
@@ -224,7 +330,7 @@ def get_ref_by_uuid(conn: Any, type_path: str, uuid_str: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Хелперы метаданных
+# Метаданные (без изменений из v0.1.0)
 # ---------------------------------------------------------------------------
 
 def hasattr_safe(obj: Any, name: str) -> bool:
@@ -281,7 +387,6 @@ def resolve_metadata(conn: Any, path: str) -> Any:
     try:
         return coll.Найти(name)
     except (AttributeError, pywintypes.com_error):
-        # Fallback: ищем перебором.
         for obj in coll:
             if str(obj.Имя) == name:
                 return obj
@@ -300,12 +405,12 @@ def virtual_tables_for(kind: str, obj: Any) -> list[str]:
     if kind == "РегистрСведений":
         return ["СрезПервых", "СрезПоследних"]
     if kind == "РегистрБухгалтерии":
-        return ["Остатки", "Обороты", "ОстаткиИОбороты", "ОборотыДтКт", "Движения", "ДвиженияССубконто"]
+        return ["Остатки", "Обороты", "ОстаткиИОбороты", "ОборотыДтКт",
+                "Движения", "ДвиженияССубконто"]
     return []
 
 
 def parse_com_error(e: pywintypes.com_error) -> str:
-    """Достать читаемое сообщение из pywintypes.com_error."""
     try:
         if len(e.args) >= 3 and e.args[2]:
             exc_info = e.args[2]
@@ -322,12 +427,22 @@ def parse_com_error(e: pywintypes.com_error) -> str:
 
 mcp = FastMCP("1c-bridge")
 
+# Описание баз — попадает в docstring каждого инструмента и Claude видит его
+# в tools/list ДО первого вопроса от пользователя.
+_DB_BLOCK = "\n\n" + get_db_descriptions() + "\n"
+
+
+def _with_db_info(doc: str) -> str:
+    """Дописывает информацию о базах в конец docstring."""
+    return doc.rstrip() + _DB_BLOCK
+
 
 @mcp.tool()
 def execute_query(
     text: str,
     parameters: dict | None = None,
     limit: int = DEFAULT_LIMIT,
+    database: str | None = None,
 ) -> dict:
     """Выполняет запрос на языке запросов 1С 8.2 и возвращает табличный результат.
 
@@ -346,19 +461,20 @@ def execute_query(
         text: Текст запроса 1С.
         parameters: Словарь параметров (опционально).
         limit: Максимум строк в ответе (по умолчанию 1000, hard cap 10000).
+        database: Ключ базы данных (см. описание в начале списка инструментов).
 
     Returns:
-        columns: схема результата [{name, type}, ...]
-        rows: список объектов {колонка: значение}
-        row_count, truncated, execution_time_ms
+        columns: схема результата
+        rows: список строк
+        row_count, truncated, execution_time_ms, database
     """
     if not text or not text.strip():
         return {"error": "Пустой текст запроса"}
-
     limit = min(max(1, int(limit)), HARD_LIMIT)
 
     try:
-        conn = get_connection()
+        db_key = resolve_database(database)
+        conn = get_connection(db_key)
         query = conn.NewObject("Запрос")
         query.Текст = text
 
@@ -368,7 +484,7 @@ def execute_query(
                     parsed = parse_parameter(raw, conn)
                     query.УстановитьПараметр(name, parsed)
                 except Exception as e:
-                    return {"error": f"Параметр '{name}': {e}"}
+                    return {"error": f"Параметр '{name}': {e}", "database": db_key}
 
         t0 = time.perf_counter()
         result = query.Выполнить()
@@ -381,6 +497,7 @@ def execute_query(
 
         if empty:
             return {
+                "database": db_key,
                 "columns": [],
                 "rows": [],
                 "row_count": 0,
@@ -388,8 +505,8 @@ def execute_query(
                 "execution_time_ms": elapsed_ms(),
             }
 
-        columns_meta: list[dict] = []
-        col_names: list[str] = []
+        columns_meta = []
+        col_names = []
         for col in result.Колонки:
             n = str(col.Имя)
             col_names.append(n)
@@ -400,13 +517,13 @@ def execute_query(
             columns_meta.append({"name": n, "type": t_str})
 
         selection = result.Выбрать()
-        rows: list[dict] = []
+        rows = []
         truncated = False
         while selection.Следующий():
             if len(rows) >= limit:
                 truncated = True
                 break
-            row: dict = {}
+            row = {}
             for cn in col_names:
                 try:
                     val = getattr(selection, cn)
@@ -416,6 +533,7 @@ def execute_query(
             rows.append(row)
 
         return {
+            "database": db_key,
             "columns": columns_meta,
             "rows": rows,
             "row_count": len(rows),
@@ -423,36 +541,39 @@ def execute_query(
             "execution_time_ms": elapsed_ms(),
         }
 
+    except ValueError as e:
+        return {"error": str(e)}
     except pywintypes.com_error as e:
-        msg = parse_com_error(e)
-        log.error("Ошибка запроса: %s", msg)
-        return {"error": f"Ошибка 1С: {msg}", "query_preview": text[:500]}
+        return {"error": f"Ошибка 1С: {parse_com_error(e)}",
+                "query_preview": text[:500]}
     except Exception as e:
-        log.exception("execute_query: непредвиденная ошибка")
+        log.exception("execute_query failed")
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
 @mcp.tool()
-def describe_object(path: str) -> dict:
+def describe_object(path: str, database: str | None = None) -> dict:
     """Возвращает структуру объекта метаданных конфигурации.
 
     Поддерживаются справочники, документы, регистры (накопления / сведений /
     бухгалтерии), перечисления, планы видов характеристик. Используй для разведки
-    перед написанием запроса — какие у регистра измерения и ресурсы, какие
-    реквизиты у документа и т.п.
+    перед написанием запроса.
 
     Args:
         path: Полное имя, например "РегистрНакопления.Продажи",
               "Справочник.Контрагенты", "Документ.РеализацияТоваровУслуг".
+        database: Ключ базы данных.
     """
     try:
-        conn = get_connection()
+        db_key = resolve_database(database)
+        conn = get_connection(db_key)
         obj = resolve_metadata(conn, path)
         if obj is None:
-            return {"error": f"Объект не найден: {path}"}
+            return {"error": f"Объект не найден: {path}", "database": db_key}
 
         kind = path.split(".")[0]
-        result: dict = {"path": path, "kind": kind, "name": str(obj.Имя)}
+        result: dict = {"database": db_key, "path": path, "kind": kind,
+                        "name": str(obj.Имя)}
 
         for prop, key in (("Синоним", "synonym"), ("Комментарий", "comment")):
             try:
@@ -503,6 +624,8 @@ def describe_object(path: str) -> dict:
 
         return result
 
+    except ValueError as e:
+        return {"error": str(e)}
     except pywintypes.com_error as e:
         return {"error": f"Ошибка 1С: {parse_com_error(e)}"}
     except Exception as e:
@@ -511,7 +634,11 @@ def describe_object(path: str) -> dict:
 
 
 @mcp.tool()
-def list_metadata(metadata_type: str, name_filter: str | None = None) -> dict:
+def list_metadata(
+    metadata_type: str,
+    name_filter: str | None = None,
+    database: str | None = None,
+) -> dict:
     """Список объектов метаданных указанной коллекции.
 
     Args:
@@ -519,16 +646,18 @@ def list_metadata(metadata_type: str, name_filter: str | None = None) -> dict:
             "Справочники", "Документы", "РегистрыНакопления", "РегистрыСведений",
             "Перечисления", "ПланыВидовХарактеристик", "Константы", "Отчеты".
         name_filter: Подстрока для отбора по имени, регистр не учитывается.
-
-    Returns:
-        type, count, names: list[str]
+        database: Ключ базы данных.
     """
     try:
-        conn = get_connection()
+        db_key = resolve_database(database)
+        conn = get_connection(db_key)
         if not hasattr_safe(conn.Метаданные, metadata_type):
-            return {"error": f"Коллекция метаданных не найдена: {metadata_type}"}
+            return {
+                "error": f"Коллекция метаданных не найдена: {metadata_type}",
+                "database": db_key,
+            }
         coll = getattr(conn.Метаданные, metadata_type)
-        names: list[str] = []
+        names = []
         f = name_filter.lower() if name_filter else None
         for o in coll:
             n = str(o.Имя)
@@ -536,30 +665,43 @@ def list_metadata(metadata_type: str, name_filter: str | None = None) -> dict:
                 continue
             names.append(n)
         names.sort()
-        return {"type": metadata_type, "count": len(names), "names": names}
+        return {
+            "database": db_key,
+            "type": metadata_type,
+            "count": len(names),
+            "names": names,
+        }
+    except ValueError as e:
+        return {"error": str(e)}
     except pywintypes.com_error as e:
         return {"error": f"Ошибка 1С: {parse_com_error(e)}"}
 
 
 @mcp.tool()
-def get_object_by_ref(uuid: str, type_path: str) -> dict:
+def get_object_by_ref(
+    uuid: str,
+    type_path: str,
+    database: str | None = None,
+) -> dict:
     """Получает реквизиты объекта справочника или документа по UUID.
 
     Args:
         uuid: Уникальный идентификатор ссылки.
         type_path: "Справочник.Контрагенты" или "Документ.РеализацияТоваровУслуг".
+        database: Ключ базы данных.
     """
     try:
-        conn = get_connection()
+        db_key = resolve_database(database)
+        conn = get_connection(db_key)
         ref = get_ref_by_uuid(conn, type_path, uuid)
         try:
             obj = ref.ПолучитьОбъект()
         except pywintypes.com_error:
             obj = None
         if obj is None:
-            return {"error": "Объект не существует или удалён"}
+            return {"error": "Объект не существует или удалён", "database": db_key}
 
-        result: dict = {"_ref": uuid, "_type": type_path}
+        result: dict = {"database": db_key, "_ref": uuid, "_type": type_path}
         for std in ("Код", "Наименование", "Номер", "Дата", "Проведен", "ПометкаУдаления"):
             try:
                 result[std] = serialize_value(getattr(obj, std))
@@ -576,6 +718,8 @@ def get_object_by_ref(uuid: str, type_path: str) -> dict:
             pass
         return result
 
+    except ValueError as e:
+        return {"error": str(e)}
     except pywintypes.com_error as e:
         return {"error": f"Ошибка 1С: {parse_com_error(e)}"}
     except Exception as e:
@@ -583,16 +727,57 @@ def get_object_by_ref(uuid: str, type_path: str) -> dict:
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
+@mcp.tool()
+def list_databases() -> dict:
+    """Возвращает список всех настроенных информационных баз с описаниями и заметками.
+
+    Каждая база имеет короткое description и развёрнутое notes — что в этой базе
+    можно найти. Используй этот инструмент когда нужно понять какая база подходит
+    для конкретного вопроса.
+    """
+    return {
+        "default_database": DB_CONFIG["default_database"],
+        "databases": {
+            key: {
+                "description": cfg.get("description", key),
+                "notes": cfg.get("notes", ""),
+                "progid": cfg["progid"],
+            }
+            for key, cfg in DB_CONFIG["databases"].items()
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Постпатч описаний: дописываем _DB_BLOCK в description каждого tool'а
+# в реестре FastMCP. Это гарантирует, что Claude в tools/list увидит
+# список баз и notes — даже без первого вызова инструмента.
+# ---------------------------------------------------------------------------
+
+def _patch_tool_descriptions():
+    try:
+        # FastMCP хранит инструменты во внутреннем реестре через ToolManager.
+        tools = mcp._tool_manager._tools  # type: ignore[attr-defined]
+        for name, tool in tools.items():
+            try:
+                if hasattr(tool, "description") and tool.description:
+                    tool.description = tool.description.rstrip() + _DB_BLOCK
+            except Exception as e:
+                log.warning("Не удалось пропатчить описание %s: %s", name, e)
+    except Exception as e:
+        log.warning("Не удалось получить реестр инструментов FastMCP: %s", e)
+
+
+_patch_tool_descriptions()
+
+
 # ---------------------------------------------------------------------------
 # Запуск
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Стартую MCP-сервер 1С (%s)", COM_PROGID)
-    try:
-        # Прогреваем соединение, чтобы упасть рано в случае ошибки конфига.
-        get_connection()
-    except Exception as e:
-        log.error("Не удалось подключиться к 1С при старте: %s", e)
-        log.error("Сервер всё равно запускается — попробуем при первом вызове.")
+    log.info("Стартую 1C MCP Bridge v0.2.0")
+    log.info("Файл со списком баз: %s", find_databases_file())
+    log.info("Базы: %s", list_database_keys())
+    log.info("По умолчанию: %s", DB_CONFIG["default_database"])
     mcp.run()

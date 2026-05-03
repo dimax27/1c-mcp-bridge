@@ -177,7 +177,53 @@ if ($DllPath -and (Test-Path $DllPath)) {
 }
 
 # -----------------------------------------------------------------------------
-# 6. claude_desktop_config.json
+# 6. databases.json — генерируем на основе параметров мастера
+# -----------------------------------------------------------------------------
+$DatabasesFile = Join-Path $AppDir 'databases.json'
+$DbKey  = $params['DBKEY']
+$DbDesc = $params['DBDESC']
+if (-not $DbKey)  { $DbKey  = 'main' }
+
+# Если databases.json уже существует (переустановка) — добавляем/обновляем нашу базу
+if (Test-Path $DatabasesFile) {
+    Log "Найден существующий $DatabasesFile — обновляю запись '$DbKey'."
+    try {
+        $dbConfig = Get-Content $DatabasesFile -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+        if (-not $dbConfig.databases) { $dbConfig.databases = @{} }
+    } catch {
+        Log "Не удалось прочитать databases.json: $($_.Exception.Message). Создаю заново."
+        $dbConfig = @{ version = 1; default_database = ''; databases = @{} }
+    }
+} else {
+    $dbConfig = @{ version = 1; default_database = ''; databases = @{} }
+}
+
+if ($dbConfig.databases -isnot [hashtable]) {
+    $tmp = @{}
+    foreach ($p in $dbConfig.databases.PSObject.Properties) { $tmp[$p.Name] = $p.Value }
+    $dbConfig.databases = $tmp
+}
+
+$dbEntry = @{
+    description = if ($DbDesc) { $DbDesc } else { $DbKey }
+    progid = $ProgID
+    connection_string = $ConnStr
+    notes = ''
+}
+if ($DllPath) { $dbEntry.dll_path = $DllPath }
+
+$dbConfig.databases[$DbKey] = $dbEntry
+if (-not $dbConfig.default_database -or $dbConfig.databases.Keys.Count -eq 1) {
+    $dbConfig.default_database = $DbKey
+}
+$dbConfig.version = 1
+
+$dbJson = $dbConfig | ConvertTo-Json -Depth 10
+[System.IO.File]::WriteAllText($DatabasesFile, $dbJson, [System.Text.UTF8Encoding]::new($false))
+Log "Записан $DatabasesFile (база '$DbKey')"
+
+# -----------------------------------------------------------------------------
+# 7. claude_desktop_config.json
 # -----------------------------------------------------------------------------
 $ClaudeDir    = Join-Path $UserAppData 'Claude'
 $ConfigPath   = Join-Path $ClaudeDir 'claude_desktop_config.json'
@@ -188,9 +234,8 @@ if (-not (Test-Path $ClaudeDir)) {
     New-Item -ItemType Directory -Path $ClaudeDir -Force | Out-Null
 }
 
-# Читаем существующий конфиг или создаём пустой объект
 if (Test-Path $ConfigPath) {
-    Log "Найден существующий config — добавляю в него блок 1c-bridge."
+    Log "Найден существующий config — обновляю блок 1c-bridge."
     try {
         $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
         $config   = $jsonText | ConvertFrom-Json -AsHashtable
@@ -207,24 +252,21 @@ if (Test-Path $ConfigPath) {
 if (-not $config.ContainsKey('mcpServers')) {
     $config['mcpServers'] = @{}
 }
-
-# Конвертим mcpServers в hashtable если он PSCustomObject
 if ($config.mcpServers -isnot [hashtable]) {
     $tmp = @{}
     foreach ($p in $config.mcpServers.PSObject.Properties) { $tmp[$p.Name] = $p.Value }
     $config.mcpServers = $tmp
 }
 
+# В v0.2.0 — указываем путь к databases.json через переменную окружения
 $config.mcpServers['1c-bridge'] = @{
     command = $VenvPython
     args    = @( (Join-Path $AppDir 'mcp_server_1c.py') )
     env     = @{
-        ONEC_COMCONNECTOR_PROGID = $ProgID
-        ONEC_CONNECTION_STRING   = $ConnStr
+        ONEC_DATABASES_FILE = $DatabasesFile
     }
 }
 
-# Записываем UTF-8 без BOM (важно — Claude Desktop ругается на BOM)
 $json = $config | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))
 Log "Конфиг обновлён: $ConfigPath"

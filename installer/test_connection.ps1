@@ -11,7 +11,7 @@ param(
 
 function Out([string]$line) {
     try {
-        Add-Content -Path $OutputFile -Value $line -Encoding Default -ErrorAction Stop
+        Add-Content -Path $OutputFile -Value $line -Encoding UTF8 -ErrorAction Stop
     } catch {
         [Console]::Error.WriteLine("FATAL: cannot write to ${OutputFile}: $_")
     }
@@ -19,7 +19,7 @@ function Out([string]$line) {
 
 # Создаём пустой файл сразу
 try {
-    Set-Content -Path $OutputFile -Value '' -Encoding Default -ErrorAction Stop
+    Set-Content -Path $OutputFile -Value '' -Encoding UTF8 -ErrorAction Stop
 } catch {
     [Console]::Error.WriteLine("FATAL: cannot create ${OutputFile}: $_")
     exit 10
@@ -37,7 +37,7 @@ try {
 
     Out "Читаю параметры..."
     $params = @{}
-    foreach ($line in Get-Content $ParamsFile -Encoding Default) {
+    foreach ($line in Get-Content $ParamsFile -Encoding UTF8) {
         if ($line -match '^([^=]+)=(.*)$') {
             $params[$matches[1].Trim()] = $matches[2].Trim()
         }

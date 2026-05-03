@@ -1,4 +1,4 @@
-; =============================================================================
+﻿; =============================================================================
 ;  1C MCP Bridge — установщик
 ;  Связывает Claude Desktop с 1С:Предприятием через COM-коннектор и MCP.
 ;
@@ -42,7 +42,6 @@ VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}.0
 DefaultDirName={autopf}\{#MyAppNameSafe}
 DefaultGroupName={#MyAppName}
-DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\dist
 OutputBaseFilename=1cMcpBridge-Setup-{#MyAppVersion}
@@ -73,6 +72,7 @@ Source: "install.ps1";                   DestDir: "{app}\installer";    Flags: i
 Source: "test_connection.ps1";           DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "uninstall.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "detect_1c.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
+Source: "manager.py";                    DestDir: "{app}\manager";      Flags: ignoreversion
 
 ; Тот же test_connection.ps1, но dontcopy — для запуска из мастера до этапа установки
 Source: "test_connection.ps1";           Flags: dontcopy
@@ -81,6 +81,12 @@ Source: "test_connection.ps1";           Flags: dontcopy
 Source: "..\assets\icon.ico";            DestDir: "{app}\assets";       Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
+Name: "{group}\1C Bridge Manager"; \
+  Filename: "{app}\.venv\Scripts\pythonw.exe"; \
+  Parameters: """{app}\manager\manager.py"""; \
+  WorkingDir: "{app}"; \
+  IconFilename: "{app}\assets\icon.ico"; \
+  Comment: "Управление списком информационных баз 1С"
 Name: "{group}\Открыть папку установки"; Filename: "{app}"
 Name: "{group}\Удалить {#MyAppName}";    Filename: "{uninstallexe}"
 Name: "{group}\Документация";            Filename: "{#MyAppURL}"
@@ -123,12 +129,16 @@ var
 
   // Страница: параметры файловой/серверной базы и аутентификации
   PageConnectionParams: TWizardPage;
+  EditDbKey:            TNewEdit;
+  EditDbDescription:    TNewEdit;
   EditFileBasePath:     TNewEdit;
   EditServerName:       TNewEdit;
   EditRefName:          TNewEdit;
   EditUser:             TNewEdit;
   EditPassword:         TNewEdit;
   CheckOSAuth:          TNewCheckBox;
+  LblDbKey:             TNewStaticText;
+  LblDbDescription:     TNewStaticText;
   LblFileBase:          TNewStaticText;
   LblServer, LblRef:    TNewStaticText;
   LblUser, LblPwd:      TNewStaticText;
@@ -291,10 +301,42 @@ var
 begin
   PageConnectionParams := CreateCustomPage(PageConnectionMode.ID,
     'Параметры подключения',
-    'Введите данные для подключения к информационной базе 1С.');
+    'Краткое имя, описание и параметры подключения к первой базе.');
 
   Y := 0;
   HalfW := (PageConnectionParams.SurfaceWidth - 12) div 2;
+
+  // --- Краткое имя базы (ключ) ---
+  LblDbKey := TNewStaticText.Create(PageConnectionParams);
+  LblDbKey.Parent := PageConnectionParams.Surface;
+  LblDbKey.Caption := 'Краткое имя базы (латиницей, например ut, bp, zup):';
+  LblDbKey.Top := Y;
+  LblDbKey.Width := HalfW;
+  LblDbKey.Left := 0;
+
+  LblDbDescription := TNewStaticText.Create(PageConnectionParams);
+  LblDbDescription.Parent := PageConnectionParams.Surface;
+  LblDbDescription.Caption := 'Описание (произвольное):';
+  LblDbDescription.Top := Y;
+  LblDbDescription.Width := HalfW;
+  LblDbDescription.Left := HalfW + 12;
+
+  Y := Y + LblDbKey.Height + 2;
+
+  EditDbKey := TNewEdit.Create(PageConnectionParams);
+  EditDbKey.Parent := PageConnectionParams.Surface;
+  EditDbKey.Top := Y;
+  EditDbKey.Width := HalfW;
+  EditDbKey.Left := 0;
+  EditDbKey.Text := 'main';
+
+  EditDbDescription := TNewEdit.Create(PageConnectionParams);
+  EditDbDescription.Parent := PageConnectionParams.Surface;
+  EditDbDescription.Top := Y;
+  EditDbDescription.Width := HalfW;
+  EditDbDescription.Left := HalfW + 12;
+
+  Y := Y + EditDbKey.Height + 12;
 
   // --- Файловая база (показывается только при выборе файлового режима) ---
   LblFileBase := TNewStaticText.Create(PageConnectionParams);
@@ -499,7 +541,7 @@ begin
   end;
 
   // Параметры в файл, UTF-8 с BOM — чтобы Get-Content в PS5 правильно прочитал кириллицу
-  SaveStringToFile(ParamsFile,
+  SaveStringToUTF8File(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
     'DLLPATH=' + GetSelectedDllPath + #13#10, False);
@@ -557,12 +599,38 @@ begin
     UpdateConnectionFieldsVisibility;
 end;
 
+function ValidateDbKey(const Key: String): Boolean;
+var
+  i: Integer;
+  ch: Char;
+begin
+  Result := False;
+  if Length(Key) = 0 then Exit;
+  for i := 1 to Length(Key) do
+  begin
+    ch := Key[i];
+    if not (((ch >= 'a') and (ch <= 'z')) or
+            ((ch >= 'A') and (ch <= 'Z')) or
+            ((ch >= '0') and (ch <= '9')) or
+            (ch = '_')) then
+      Exit;
+  end;
+  Result := True;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
 
   if CurPageID = PageConnectionParams.ID then
   begin
+    if not ValidateDbKey(Trim(EditDbKey.Text)) then
+    begin
+      MsgBox('Краткое имя базы должно содержать только латинские буквы, цифры и подчёркивание.',
+             mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
     if PageConnectionMode.SelectedValueIndex = 0 then
     begin
       if Trim(EditFileBasePath.Text) = '' then
@@ -605,6 +673,8 @@ begin
       'PROGID='   + GetSelectedProgID    + #13#10 +
       'CONNSTR='  + BuildConnectionString + #13#10 +
       'DLLPATH='  + GetSelectedDllPath   + #13#10 +
+      'DBKEY='    + Trim(EditDbKey.Text) + #13#10 +
+      'DBDESC='   + Trim(EditDbDescription.Text) + #13#10 +
       'APPDIR='   + ExpandConstant('{app}') + #13#10 +
       'USERAPPDATA=' + ExpandConstant('{userappdata}') + #13#10,
       False);
