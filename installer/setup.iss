@@ -433,7 +433,7 @@ begin
 
   if Exec('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    LoadStringFromFile(TmpFile, Output);
+    LoadStringFromFileInUTF8(TmpFile, Output);
     MemoTestOutput.Lines.Text := Output;
     TestPassed := (ResultCode = 0);
   end
