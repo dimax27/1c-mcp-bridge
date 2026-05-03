@@ -17,6 +17,9 @@ param()
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
+# Старые Windows/PS5 по умолчанию используют TLS 1.0/1.1, python.org требует 1.2+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+
 # Лог пишем рядом с инсталлером — потом удобно дебажить
 $LogPath = Join-Path $PSScriptRoot 'install.log'
 function Log {
