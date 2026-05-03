@@ -69,11 +69,25 @@ HARD_LIMIT = int(os.environ.get("ONEC_HARD_LIMIT", "10000"))
 
 
 def find_databases_file() -> Path:
-    """Ищем databases.json: ONEC_DATABASES_FILE → рядом со скриптом → CWD."""
+    """Ищем databases.json в порядке приоритета:
+    ONEC_DATABASES_FILE → ProgramData → Program Files → рядом со скриптом.
+    """
     env_path = os.environ.get("ONEC_DATABASES_FILE", "").strip()
     if env_path:
         return Path(env_path)
-    return Path(__file__).resolve().parent / "databases.json"
+
+    program_data = os.environ.get("PROGRAMDATA", "C:/ProgramData")
+    standard = Path(program_data) / "1cMcpBridge" / "databases.json"
+    if standard.exists():
+        return standard
+
+    here = Path(__file__).resolve().parent
+    for legacy in [Path("C:/Program Files/1cMcpBridge/databases.json"),
+                   here / "databases.json"]:
+        if legacy.exists():
+            return legacy
+
+    return standard
 
 
 def load_databases() -> dict:

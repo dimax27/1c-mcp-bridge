@@ -42,21 +42,38 @@ from tkinter import ttk, messagebox, filedialog, scrolledtext
 # ---------------------------------------------------------------------------
 
 def find_databases_file() -> Path:
-    """Ищем databases.json: переменная окружения → корень установки → CWD."""
+    """Ищем databases.json в порядке приоритета:
+    1. ONEC_DATABASES_FILE (переменная окружения, если задана)
+    2. %PROGRAMDATA%\\1cMcpBridge\\databases.json (новый стандартный путь, доступен на запись всем)
+    3. C:\\Program Files\\1cMcpBridge\\databases.json (старый путь — для совместимости с v0.2.0-beta.1)
+    4. Рядом с manager.py (для разработки)
+    Если ни один не существует — создаст в #2.
+    """
     env_path = os.environ.get("ONEC_DATABASES_FILE", "").strip()
     if env_path:
         return Path(env_path)
-    # manager.py обычно лежит в C:\Program Files\1cMcpBridge\manager\manager.py
+
+    program_data = os.environ.get("PROGRAMDATA", "C:/ProgramData")
+    standard = Path(program_data) / "1cMcpBridge" / "databases.json"
+
     here = Path(__file__).resolve().parent
-    candidates = [
+    legacy_candidates = [
+        Path("C:/Program Files/1cMcpBridge/databases.json"),
         here.parent / "databases.json",
         here / "databases.json",
-        Path("C:/Program Files/1cMcpBridge/databases.json"),
     ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return candidates[0]  # default
+
+    # Если есть в новом — используем его
+    if standard.exists():
+        return standard
+
+    # Если есть только в старом — используем его (с предупреждением)
+    for legacy in legacy_candidates:
+        if legacy.exists():
+            return legacy
+
+    # Ничего нет — создаём в стандартном
+    return standard
 
 
 DB_FILE = find_databases_file()
@@ -112,11 +129,7 @@ def find_platforms() -> list[dict]:
             if not d.is_dir():
                 continue
             dll = d / "bin" / "comcntr.dll"
-            try:
-                if not dll.exists():
-                    continue
-            except (PermissionError, OSError):
-                # Нет прав читать атрибуты — пропускаем эту версию
+            if not dll.exists():
                 continue
             version = d.name
             parts = version.split(".")
@@ -203,6 +216,7 @@ class ManagerApp(tk.Tk):
         self.config_data = load_config()
         self.current_key: str | None = None
         self.dirty = False
+        self._loading = False  # True во время _load_into_form, чтобы mark_dirty не срабатывал
 
         self._build_ui()
         self._refresh_list()
@@ -385,7 +399,8 @@ class ManagerApp(tk.Tk):
         return parts[0].strip()
 
     def _on_select(self, event=None):
-        if self.dirty:
+        # Игнорируем dirty если форма ещё ни разу не была заполнена
+        if self.dirty and self.current_key is not None:
             if not messagebox.askyesno("Несохранённые изменения",
                                         "Есть несохранённые изменения. Отбросить?"):
                 # Возвращаем выделение
@@ -402,7 +417,11 @@ class ManagerApp(tk.Tk):
             self._set_form_enabled(False)
             return
         self.current_key = key
-        self._load_into_form(self.config_data["databases"][key])
+        self._loading = True
+        try:
+            self._load_into_form(self.config_data["databases"][key])
+        finally:
+            self._loading = False
         self._set_form_enabled(True)
         self.dirty = False
 
@@ -658,7 +677,9 @@ def main():
     app = ManagerApp()
 
     def mark_dirty(*_):
-        app.dirty = True
+        # Не отмечаем как изменённое, если поля заполняются программно (загрузка)
+        if not getattr(app, "_loading", False):
+            app.dirty = True
 
     # Привязываем к каждому изменению
     for var in [app.var_key, app.var_description, app.var_progid, app.var_type,

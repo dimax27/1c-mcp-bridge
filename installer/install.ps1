@@ -216,12 +216,26 @@ if ($DllPath -and (Test-Path $DllPath)) {
 # 6. databases.json — генерируем на основе параметров мастера
 # -----------------------------------------------------------------------------
 Stage "Создание databases.json"
-$DatabasesFile = Join-Path $AppDir 'databases.json'
+
+# В v0.2.0+ файл лежит в ProgramData (доступен на запись обычным пользователям)
+$DataDir = Join-Path $env:PROGRAMDATA '1cMcpBridge'
+if (-not (Test-Path $DataDir)) {
+    New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+}
+$DatabasesFile = Join-Path $DataDir 'databases.json'
+
+# Миграция со старого пути (v0.2.0-beta.1 и ранее)
+$LegacyFile = Join-Path $AppDir 'databases.json'
+if ((Test-Path $LegacyFile) -and -not (Test-Path $DatabasesFile)) {
+    Log "Переношу $LegacyFile -> $DatabasesFile"
+    Copy-Item $LegacyFile $DatabasesFile -Force
+    # Старый файл удалим в самом конце, после успешной записи нового
+}
+
 $DbKey  = $params['DBKEY']
 $DbDesc = $params['DBDESC']
 if (-not $DbKey)  { $DbKey  = 'main' }
 
-# Если databases.json уже существует (переустановка) — добавляем/обновляем нашу базу
 if (Test-Path $DatabasesFile) {
     Log "Найден существующий $DatabasesFile — обновляю запись '$DbKey'."
     try {
@@ -258,6 +272,24 @@ $dbConfig.version = 1
 $dbJson = $dbConfig | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($DatabasesFile, $dbJson, [System.Text.UTF8Encoding]::new($false))
 Log "Записан $DatabasesFile (база '$DbKey')"
+
+# Даём права на запись всем пользователям машины — иначе Manager без админа не сможет править
+try {
+    $acl = Get-Acl $DatabasesFile
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "Users", "FullControl", "Allow")
+    $acl.SetAccessRule($rule)
+    Set-Acl $DatabasesFile $acl
+    Log "Установлены права записи для группы Users."
+} catch {
+    Log "Не удалось установить права на $DatabasesFile : $($_.Exception.Message)"
+}
+
+# Удаляем legacy-файл (если был)
+if ((Test-Path $LegacyFile) -and ($LegacyFile -ne $DatabasesFile)) {
+    Remove-Item $LegacyFile -Force -ErrorAction SilentlyContinue
+    Log "Удалён старый $LegacyFile"
+}
 
 # -----------------------------------------------------------------------------
 # 7. claude_desktop_config.json
