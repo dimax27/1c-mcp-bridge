@@ -367,7 +367,7 @@ begin
   MemoTestOutput.Top := BtnTest.Top + BtnTest.Height + 12;
   MemoTestOutput.Width := PageTest.SurfaceWidth;
   MemoTestOutput.Height := PageTest.SurfaceHeight - BtnTest.Height - 12;
-  MemoTestOutput.ScrollBars := 2;
+  MemoTestOutput.ScrollBars := ssVertical;
   MemoTestOutput.ReadOnly := True;
   MemoTestOutput.Text := 'Нажмите «Проверить» — установщик попытается подключиться к 1С с введёнными параметрами.' + #13#10 +
                         '(Этот шаг не обязателен, можно пропустить кнопкой «Далее».)';
