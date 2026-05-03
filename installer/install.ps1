@@ -149,6 +149,28 @@ if ($DllPath -and (Test-Path $DllPath)) {
     } else {
         Log "COM-коннектор зарегистрирован."
     }
+
+    # Массовая регистрация остальных DLL из bin'а 1С.
+    # При первом подключении через V83.COMConnector платформа подгружает
+    # type-libraries из соседних DLL (frnt*, bsl*, wbas*, …). Если они не
+    # зарегистрированы — Connect() падает с TYPE_E_LIBNOTREGISTERED (0x8002801D).
+    # Регистрируем все доступные DLL — лишнего не будет, regsvr32 для не-COM
+    # библиотек просто молча пропустит.
+    $binDir = Split-Path $DllPath -Parent
+    if (Test-Path $binDir) {
+        Log "Регистрирую остальные DLL из $binDir (для type-libraries)..."
+        $count = 0
+        Get-ChildItem $binDir -Filter '*.dll' -ErrorAction SilentlyContinue | ForEach-Object {
+            # comcntr уже сделан выше — пропускаем
+            if ($_.Name -ieq 'comcntr.dll') { return }
+            # /s - silent, /i - вызов DllInstall если есть
+            Start-Process -FilePath 'regsvr32.exe' `
+                          -ArgumentList @('/s', "`"$($_.FullName)`"") `
+                          -Wait -PassThru -ErrorAction SilentlyContinue | Out-Null
+            $count++
+        }
+        Log "Обработано DLL: $count (часть из них не COM — это нормально)."
+    }
 } else {
     Log "Путь к comcntr.dll не задан или не существует ($DllPath). Пропускаю regsvr32."
     Log "Если потом возникнет ошибка 'Class not registered' — выполни вручную: regsvr32 <путь к comcntr.dll>"

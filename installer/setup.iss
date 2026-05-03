@@ -1,4 +1,4 @@
-; =============================================================================
+﻿; =============================================================================
 ;  1C MCP Bridge — установщик
 ;  Связывает Claude Desktop с 1С:Предприятием через COM-коннектор и MCP.
 ;
@@ -15,8 +15,9 @@
 #if MyAppVersion == ""
   #define MyAppVersion "0.1.0-dev"
 #endif
-#define MyAppPublisher   "Open Source"
-#define MyAppURL         "https://github.com/REPLACE_ME/1c-mcp-bridge"
+#define MyAppPublisher   "Koovykin D."
+#define MyAppCopyright   "Copyright (C) 2026 Koovykin D."
+#define MyAppURL         "https://github.com/dimax27/1c-mcp-bridge"
 #define MyAppExeName     "mcp_server_1c.py"
 #define PythonVersion    "3.12.7"
 #define PythonInstaller  "python-" + PythonVersion + "-amd64.exe"
@@ -30,6 +31,15 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
+AppCopyright={#MyAppCopyright}
+AppContact=Koovykin D.
+AppComments=MCP-сервер для подключения Claude Desktop к 1С:Предприятию через COM-коннектор
+VersionInfoVersion={#MyAppVersion}.0
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoCopyright={#MyAppCopyright}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}.0
 DefaultDirName={autopf}\{#MyAppNameSafe}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -44,6 +54,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
 UninstallDisplayIcon={app}\assets\icon.ico
+SetupIconFile=..\assets\icon.ico
 SetupLogging=yes
 
 [Languages]
@@ -488,7 +499,7 @@ begin
   end;
 
   // Параметры в файл, UTF-8 с BOM — чтобы Get-Content в PS5 правильно прочитал кириллицу
-  SaveStringToFile(ParamsFile,
+  SaveStringToUTF8File(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
     'DLLPATH=' + GetSelectedDllPath + #13#10, False);
@@ -582,6 +593,9 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ParamsPath: String;
+  ClaudeExe:  String;
+  ClaudeFound: Boolean;
+  Msg: String;
 begin
   if CurStep = ssInstall then
   begin
@@ -594,5 +608,44 @@ begin
       'APPDIR='   + ExpandConstant('{app}') + #13#10 +
       'USERAPPDATA=' + ExpandConstant('{userappdata}') + #13#10,
       False);
+  end;
+
+  if CurStep = ssPostInstall then
+  begin
+    // Проверяем, установлен ли Claude Desktop
+    ClaudeFound := False;
+    ClaudeExe := ExpandConstant('{localappdata}\AnthropicClaude\Claude.exe');
+    if FileExists(ClaudeExe) then ClaudeFound := True;
+    if not ClaudeFound then
+    begin
+      ClaudeExe := ExpandConstant('{localappdata}\Programs\claude-desktop\Claude.exe');
+      if FileExists(ClaudeExe) then ClaudeFound := True;
+    end;
+    if not ClaudeFound then
+    begin
+      // Косвенный признак: папка %APPDATA%\Claude
+      if DirExists(ExpandConstant('{userappdata}\Claude')) then
+        ClaudeFound := True;
+    end;
+
+    if ClaudeFound then
+    begin
+      Msg := 'Установка завершена.' + #13#10 + #13#10 +
+             'Чтобы Claude Desktop увидел MCP-сервер 1C Bridge, его нужно полностью перезапустить:' + #13#10 +
+             '  1. Правый клик по иконке Claude в системном трее (рядом с часами).' + #13#10 +
+             '  2. Выбери Quit (или "Выйти").' + #13#10 +
+             '  3. Запусти Claude Desktop снова.' + #13#10 + #13#10 +
+             'В новом чате внизу появится индикатор инструментов с сервером 1c-bridge ' +
+             'и четырьмя инструментами (execute_query, describe_object, list_metadata, get_object_by_ref).';
+      MsgBox(Msg, mbInformation, MB_OK);
+    end
+    else
+    begin
+      Msg := 'Установка завершена, но Claude Desktop на этом компьютере не обнаружен.' + #13#10 + #13#10 +
+             'Чтобы пользоваться 1C MCP Bridge, скачайте и установите Claude Desktop:' + #13#10 +
+             '  https://claude.ai/download' + #13#10 + #13#10 +
+             'После первого запуска Claude Desktop конфигурация сервера 1c-bridge подхватится автоматически.';
+      MsgBox(Msg, mbInformation, MB_OK);
+    end;
   end;
 end;

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!--
+    1C MCP Bridge icon: 1C (yellow square) <-> Claude (orange burst).
+    Designed at 256×256, scales cleanly to 16/32/48/64/128/256.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1f2e"/>
+      <stop offset="1" stop-color="#0c0f17"/>
+    </linearGradient>
+    <linearGradient id="oneC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd24a"/>
+      <stop offset="1" stop-color="#f5a623"/>
+    </linearGradient>
+    <linearGradient id="claude" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a3d"/>
+      <stop offset="1" stop-color="#d97757"/>
+    </linearGradient>
+    <linearGradient id="link" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"   stop-color="#ffd24a"/>
+      <stop offset="0.5" stop-color="#ffffff"/>
+      <stop offset="1"   stop-color="#d97757"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Скруглённый фон -->
+  <rect x="0" y="0" width="256" height="256" rx="48" ry="48" fill="url(#bg)"/>
+
+  <!-- Левая сторона: квадрат 1С с надписью "1C" -->
+  <g>
+    <rect x="24" y="74" width="92" height="108" rx="14" ry="14" fill="url(#oneC)"/>
+    <text x="70" y="148"
+          font-family="Arial, sans-serif"
+          font-size="58" font-weight="800"
+          text-anchor="middle"
+          fill="#1a1f2e">1C</text>
+  </g>
+
+  <!-- Правая сторона: 8-лучевая звёздочка Claude (стилизация под фирменный знак) -->
+  <g transform="translate(186, 128)">
+    <!-- 8 лучей через polygon -->
+    <g fill="url(#claude)">
+      <!-- горизонтальная пара -->
+      <path d="M -46,-7 Q -8,-3 0,0 Q -8,3 -46,7 Q -34,0 -46,-7 Z"/>
+      <path d="M  46,-7 Q  8,-3 0,0 Q  8,3  46,7 Q  34,0  46,-7 Z"/>
+      <!-- вертикальная пара -->
+      <path d="M -7,-46 Q -3,-8 0,0 Q 3,-8 7,-46 Q 0,-34 -7,-46 Z"/>
+      <path d="M -7, 46 Q -3, 8 0,0 Q 3, 8 7, 46 Q 0, 34 -7, 46 Z"/>
+      <!-- диагональные пары -->
+      <g transform="rotate(45)">
+        <path d="M -36,-5 Q -6,-2 0,0 Q -6,2 -36,5 Q -26,0 -36,-5 Z"/>
+        <path d="M  36,-5 Q  6,-2 0,0 Q  6,2  36,5 Q  26,0  36,-5 Z"/>
+        <path d="M -5,-36 Q -2,-6 0,0 Q 2,-6 5,-36 Q 0,-26 -5,-36 Z"/>
+        <path d="M -5, 36 Q -2, 6 0,0 Q 2, 6 5, 36 Q 0, 26 -5, 36 Z"/>
+      </g>
+    </g>
+    <!-- Центральная точка -->
+    <circle r="6" fill="#d97757"/>
+  </g>
+
+  <!-- Связь между ними: двунаправленная стрелка с градиентом -->
+  <g>
+    <!-- Линия -->
+    <rect x="120" y="124" width="32" height="8" fill="url(#link)" rx="4"/>
+    <!-- Стрелка вправо (к Claude) -->
+    <path d="M 152,114 L 168,128 L 152,142 Z" fill="#d97757"/>
+    <!-- Стрелка влево (к 1С) -->
+    <path d="M 120,114 L 104,128 L 120,142 Z" fill="#f5a623"/>
+  </g>
+</svg>
