@@ -126,16 +126,24 @@ def load_databases() -> dict:
         # Описание короткое, notes — длинное (что в этой базе можно найти)
         cfg.setdefault("description", key)
         cfg.setdefault("notes", "")
+        cfg.setdefault("enabled", True)
 
-    default_db = data.get("default_database") or next(iter(databases))
-    if default_db not in databases:
+    # Фильтруем отключённые — Claude их вообще не должен видеть
+    enabled_databases = {k: v for k, v in databases.items() if v.get("enabled", True)}
+    if not enabled_databases:
         raise RuntimeError(
-            f"default_database '{default_db}' не найдена в списке баз"
+            f"{path}: все базы отключены (enabled=false). "
+            f"Включи хотя бы одну в 1C Bridge Manager."
         )
+
+    default_db = data.get("default_database") or next(iter(enabled_databases))
+    if default_db not in enabled_databases:
+        # default отключена — берём первую включённую
+        default_db = next(iter(enabled_databases))
 
     return {
         "default_database": default_db,
-        "databases": databases,
+        "databases": enabled_databases,
     }
 
 

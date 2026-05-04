@@ -261,6 +261,18 @@ class ManagerApp(tk.Tk):
 
         # Сетка с полями
         row = 0
+
+        # Переключатель "База используется" — крупный, в самом верху
+        self.var_enabled = tk.BooleanVar(value=True)
+        enabled_frame = ttk.Frame(right)
+        enabled_frame.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Checkbutton(
+            enabled_frame,
+            text="Использовать эту базу (если снять — Claude её не увидит, но запись остаётся)",
+            variable=self.var_enabled
+        ).pack(side=tk.LEFT)
+        row += 1
+
         ttk.Label(right, text="Краткое имя:", anchor="w").grid(row=row, column=0, sticky="w", pady=2)
         self.var_key = tk.StringVar()
         self.entry_key = ttk.Entry(right, textvariable=self.var_key, width=20)
@@ -374,100 +386,26 @@ class ManagerApp(tk.Tk):
         self._on_type_change()
         self._on_auth_change()
         self._set_form_enabled(False)
-        self._setup_clipboard_bindings()
 
-
-    def _setup_clipboard_bindings(self):
-        """Включаем Ctrl+C/V/X и контекстное меню для русской раскладки.
-        Tkinter по умолчанию не реагирует на Ctrl+V когда раскладка русская."""
-
-        def cut(w):
-            try: w.event_generate("<<Cut>>")
-            except: pass
-            return "break"
-
-        def copy(w):
-            try: w.event_generate("<<Copy>>")
-            except: pass
-            return "break"
-
-        def paste(w):
-            try: w.event_generate("<<Paste>>")
-            except: pass
-            return "break"
-
-        def select_all(w):
-            try:
-                if isinstance(w, tk.Text) or w.winfo_class() == "Text":
-                    w.tag_add("sel", "1.0", "end")
-                else:
-                    w.select_range(0, "end")
-                    w.icursor("end")
-            except: pass
-            return "break"
-
-        # Контекстное меню
-        menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label="Вырезать (Ctrl+X)", command=lambda: cut(self.focus_get()))
-        menu.add_command(label="Копировать (Ctrl+C)", command=lambda: copy(self.focus_get()))
-        menu.add_command(label="Вставить (Ctrl+V)", command=lambda: paste(self.focus_get()))
-        menu.add_separator()
-        menu.add_command(label="Выделить всё (Ctrl+A)", command=lambda: select_all(self.focus_get()))
-
-        def show_menu(event):
-            try:
-                event.widget.focus_set()
-                menu.tk_popup(event.x_root, event.y_root)
-            finally:
-                menu.grab_release()
-
-        # Привязываем ко всему окну для всех Entry/Text — и для русских кнопок тоже
-        for combo in ["<Control-KeyPress>"]:
-            self.bind_all(combo, lambda e: self._handle_ctrl_key(e), add="+")
-
-        # Правая кнопка мыши — контекстное меню
-        self.bind_class("TEntry", "<Button-3>", show_menu)
-        self.bind_class("Entry", "<Button-3>", show_menu)
-        self.bind_class("Text", "<Button-3>", show_menu)
-
-    def _handle_ctrl_key(self, event):
-        """Обрабатывает Ctrl+C/V/X/A независимо от раскладки клавиатуры.
-        Tkinter в Windows не транслирует кириллические Ctrl+комбинации в события."""
-        # event.keycode — physical key, не зависит от раскладки
-        # 67=C, 86=V, 88=X, 65=A
-        widget = event.widget
-        if event.keycode == 86:  # V
-            try: widget.event_generate("<<Paste>>")
-            except: pass
-            return "break"
-        if event.keycode == 67:  # C
-            try: widget.event_generate("<<Copy>>")
-            except: pass
-            return "break"
-        if event.keycode == 88:  # X
-            try: widget.event_generate("<<Cut>>")
-            except: pass
-            return "break"
-        if event.keycode == 65:  # A
-            try:
-                if widget.winfo_class() == "Text":
-                    widget.tag_add("sel", "1.0", "end")
-                else:
-                    widget.select_range(0, "end")
-                    widget.icursor("end")
-            except: pass
-            return "break"
     # ----- Список баз -----
     def _refresh_list(self):
         self.listbox.delete(0, tk.END)
         default = self.config_data.get("default_database", "")
         for key in sorted(self.config_data["databases"].keys()):
             cfg = self.config_data["databases"][key]
-            marker = "  ●" if key == default else "   "
+            enabled = cfg.get("enabled", True)
+            if not enabled:
+                marker = "  ⊘"  # отключена
+            elif key == default:
+                marker = "  ●"  # по умолчанию
+            else:
+                marker = "   "
             display = f"{marker} {key}"
             desc = cfg.get("description", "")
             if desc:
                 display += f"  — {desc}"
+            if not enabled:
+                display += "   (отключена)"
             self.listbox.insert(tk.END, display)
         self.status_var.set(f"Баз в списке: {self.listbox.size()}")
 
@@ -476,8 +414,8 @@ class ManagerApp(tk.Tk):
         if not sel:
             return None
         text = self.listbox.get(sel[0])
-        # формат: "  ● key — desc"
-        parts = text.lstrip(" ●").strip().split("  —", 1)
+        # формат: "  ● key — desc" / "  ⊘ key — desc (отключена)"
+        parts = text.lstrip(" ●⊘").strip().split("  —", 1)
         return parts[0].strip()
 
     def _on_select(self, event=None):
@@ -510,6 +448,7 @@ class ManagerApp(tk.Tk):
     def _load_into_form(self, cfg: dict):
         self.var_key.set(self.current_key or "")
         self.var_description.set(cfg.get("description", ""))
+        self.var_enabled.set(cfg.get("enabled", True))
 
         # ProgID
         progid = cfg.get("progid", "")
@@ -564,17 +503,13 @@ class ManagerApp(tk.Tk):
     # ----- Тип / аутентификация -----
     def _on_type_change(self):
         is_file = self.var_type.get() == "file"
-        # Серверные поля
-        for w in [self.entry_server, self.entry_ref]:
-            w.configure(state="disabled" if is_file else "normal")
-        # Файловое поле
+        for w, show in [(self.entry_server, not is_file),
+                        (self.entry_ref, not is_file)]:
+            if show:
+                w.configure(state="normal")
+            else:
+                w.configure(state="disabled")
         self.entry_file.configure(state="normal" if is_file else "disabled")
-        # Метки тоже обновляем для визуальной ясности
-        try:
-            for w in [self.entry_server, self.entry_ref]:
-                w.master.update_idletasks()
-        except Exception:
-            pass
 
     def _on_auth_change(self):
         os_auth = self.var_os_auth.get()
@@ -690,6 +625,7 @@ class ManagerApp(tk.Tk):
 
         progid, dll = self._selected_progid_and_dll()
         cfg = {
+            "enabled": self.var_enabled.get(),
             "description": self.var_description.get().strip(),
             "progid": progid,
             "connection_string": self._build_connstr(),
@@ -770,7 +706,7 @@ def main():
     # Привязываем к каждому изменению
     for var in [app.var_key, app.var_description, app.var_progid, app.var_type,
                 app.var_server, app.var_ref, app.var_file,
-                app.var_user, app.var_password, app.var_os_auth]:
+                app.var_user, app.var_password, app.var_os_auth, app.var_enabled]:
         var.trace_add("write", mark_dirty)
     app.text_notes.bind("<KeyRelease>", lambda e: mark_dirty())
 
