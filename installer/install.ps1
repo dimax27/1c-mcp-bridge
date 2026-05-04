@@ -138,7 +138,30 @@ Stage "Создание изолированной Python-среды (venv)"
 $VenvDir = Join-Path $AppDir '.venv'
 if (Test-Path $VenvDir) {
     Log "Удаляю старый venv..."
-    Remove-Item -Recurse -Force $VenvDir
+    # Сначала убиваем все python из старого venv (Claude Desktop мог держать процесс)
+    Get-Process python, pythonw -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and ($_.Path -like "$VenvDir*") } catch { $false }
+    } | ForEach-Object {
+        Log "Останавливаю процесс $($_.Id) ($($_.Path))..."
+        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+
+    $attempts = 0
+    while ((Test-Path $VenvDir) -and $attempts -lt 5) {
+        try {
+            Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop
+            break
+        } catch {
+            $attempts++
+            Log "Попытка $attempts из 5: файл занят, жду 3 секунды..."
+            Start-Sleep -Seconds 3
+        }
+    }
+    if (Test-Path $VenvDir) {
+        Log "Не удалось удалить $VenvDir. Закройте Claude Desktop полностью (Quit из трея) и попробуйте снова."
+        throw "venv заблокирован: $VenvDir"
+    }
 }
 Log "Создаю venv в $VenvDir"
 & $PythonExe -m venv $VenvDir
