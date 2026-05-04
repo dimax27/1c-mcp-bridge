@@ -374,7 +374,89 @@ class ManagerApp(tk.Tk):
         self._on_type_change()
         self._on_auth_change()
         self._set_form_enabled(False)
+        self._setup_clipboard_bindings()
 
+
+    def _setup_clipboard_bindings(self):
+        """Включаем Ctrl+C/V/X и контекстное меню для русской раскладки.
+        Tkinter по умолчанию не реагирует на Ctrl+V когда раскладка русская."""
+
+        def cut(w):
+            try: w.event_generate("<<Cut>>")
+            except: pass
+            return "break"
+
+        def copy(w):
+            try: w.event_generate("<<Copy>>")
+            except: pass
+            return "break"
+
+        def paste(w):
+            try: w.event_generate("<<Paste>>")
+            except: pass
+            return "break"
+
+        def select_all(w):
+            try:
+                if isinstance(w, tk.Text) or w.winfo_class() == "Text":
+                    w.tag_add("sel", "1.0", "end")
+                else:
+                    w.select_range(0, "end")
+                    w.icursor("end")
+            except: pass
+            return "break"
+
+        # Контекстное меню
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Вырезать (Ctrl+X)", command=lambda: cut(self.focus_get()))
+        menu.add_command(label="Копировать (Ctrl+C)", command=lambda: copy(self.focus_get()))
+        menu.add_command(label="Вставить (Ctrl+V)", command=lambda: paste(self.focus_get()))
+        menu.add_separator()
+        menu.add_command(label="Выделить всё (Ctrl+A)", command=lambda: select_all(self.focus_get()))
+
+        def show_menu(event):
+            try:
+                event.widget.focus_set()
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        # Привязываем ко всему окну для всех Entry/Text — и для русских кнопок тоже
+        for combo in ["<Control-KeyPress>"]:
+            self.bind_all(combo, lambda e: self._handle_ctrl_key(e), add="+")
+
+        # Правая кнопка мыши — контекстное меню
+        self.bind_class("TEntry", "<Button-3>", show_menu)
+        self.bind_class("Entry", "<Button-3>", show_menu)
+        self.bind_class("Text", "<Button-3>", show_menu)
+
+    def _handle_ctrl_key(self, event):
+        """Обрабатывает Ctrl+C/V/X/A независимо от раскладки клавиатуры.
+        Tkinter в Windows не транслирует кириллические Ctrl+комбинации в события."""
+        # event.keycode — physical key, не зависит от раскладки
+        # 67=C, 86=V, 88=X, 65=A
+        widget = event.widget
+        if event.keycode == 86:  # V
+            try: widget.event_generate("<<Paste>>")
+            except: pass
+            return "break"
+        if event.keycode == 67:  # C
+            try: widget.event_generate("<<Copy>>")
+            except: pass
+            return "break"
+        if event.keycode == 88:  # X
+            try: widget.event_generate("<<Cut>>")
+            except: pass
+            return "break"
+        if event.keycode == 65:  # A
+            try:
+                if widget.winfo_class() == "Text":
+                    widget.tag_add("sel", "1.0", "end")
+                else:
+                    widget.select_range(0, "end")
+                    widget.icursor("end")
+            except: pass
+            return "break"
     # ----- Список баз -----
     def _refresh_list(self):
         self.listbox.delete(0, tk.END)
