@@ -564,13 +564,17 @@ class ManagerApp(tk.Tk):
     # ----- Тип / аутентификация -----
     def _on_type_change(self):
         is_file = self.var_type.get() == "file"
-        for w, show in [(self.entry_server, not is_file),
-                        (self.entry_ref, not is_file)]:
-            if show:
-                w.configure(state="normal")
-            else:
-                w.configure(state="disabled")
+        # Серверные поля
+        for w in [self.entry_server, self.entry_ref]:
+            w.configure(state="disabled" if is_file else "normal")
+        # Файловое поле
         self.entry_file.configure(state="normal" if is_file else "disabled")
+        # Метки тоже обновляем для визуальной ясности
+        try:
+            for w in [self.entry_server, self.entry_ref]:
+                w.master.update_idletasks()
+        except Exception:
+            pass
 
     def _on_auth_change(self):
         os_auth = self.var_os_auth.get()
