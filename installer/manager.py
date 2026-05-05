@@ -353,6 +353,19 @@ class ManagerApp(tk.Tk):
         self.entry_password.grid(row=row, column=1, columnspan=2, sticky="ew", pady=2)
         row += 1
 
+        # Папка дроппера (для v0.3.0 — execute_code)
+        ttk.Label(right, text="Папка дроппера:", anchor="w").grid(row=row, column=0, sticky="w", pady=2)
+        self.var_dropper = tk.StringVar()
+        dropper_frame = ttk.Frame(right)
+        dropper_frame.grid(row=row, column=1, columnspan=2, sticky="ew", pady=2)
+        self.entry_dropper = ttk.Entry(dropper_frame, textvariable=self.var_dropper)
+        self.entry_dropper.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(dropper_frame, text="...", width=3,
+                   command=self._browse_dropper).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Label(right, text="(для записи в базу через 1С обработку)",
+                  foreground="#888", font=("Segoe UI", 8)).grid(row=row+1, column=1, sticky="w")
+        row += 2
+
         # Notes — большой Text
         ttk.Label(right, text="Заметки для Claude\n(что в этой базе):",
                   anchor="w", justify="left").grid(row=row, column=0, sticky="nw", pady=(8, 2))
@@ -449,6 +462,7 @@ class ManagerApp(tk.Tk):
         self.var_key.set(self.current_key or "")
         self.var_description.set(cfg.get("description", ""))
         self.var_enabled.set(cfg.get("enabled", True))
+        self.var_dropper.set(cfg.get("dropper_path", ""))
 
         # ProgID
         progid = cfg.get("progid", "")
@@ -520,6 +534,20 @@ class ManagerApp(tk.Tk):
         path = filedialog.askdirectory(title="Выберите каталог файловой базы 1С")
         if path:
             self.var_file.set(path)
+
+    def _browse_dropper(self):
+        # Дефолт — %LOCALAPPDATA%\1cMcpBridge\dropper\<key>
+        initial = self.var_dropper.get()
+        if not initial:
+            local_app = os.environ.get("LOCALAPPDATA", "")
+            key = self.var_key.get().strip() or "main"
+            if local_app:
+                initial = str(Path(local_app) / "1cMcpBridge" / "dropper" / key)
+        path = filedialog.askdirectory(
+            title="Выберите папку дроппера (там будут inbox/done/errors)",
+            initialdir=initial if initial else "/")
+        if path:
+            self.var_dropper.set(path)
 
     # ----- Сборка connection_string -----
     def _build_connstr(self) -> str:
@@ -630,6 +658,7 @@ class ManagerApp(tk.Tk):
             "progid": progid,
             "connection_string": self._build_connstr(),
             "notes": self.text_notes.get("1.0", "end-1c").strip(),
+            "dropper_path": self.var_dropper.get().strip(),
         }
         if dll:
             cfg["dll_path"] = dll
@@ -637,6 +666,19 @@ class ManagerApp(tk.Tk):
         self.current_key = key
         save_config(self.config_data)
         self.dirty = False
+
+        # Создаём папки дроппера если задан путь
+        dropper = cfg.get("dropper_path", "").strip()
+        if dropper:
+            try:
+                for sub in ("inbox", "done", "errors", "screenshots"):
+                    (Path(dropper) / sub).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                messagebox.showwarning(
+                    "Предупреждение",
+                    f"Не удалось создать подпапки дроппера в {dropper}:\n{e}\n\n"
+                    "Создайте их вручную или измените путь.")
+
         self._refresh_list()
 
         # Восстанавливаем выделение
@@ -706,7 +748,8 @@ def main():
     # Привязываем к каждому изменению
     for var in [app.var_key, app.var_description, app.var_progid, app.var_type,
                 app.var_server, app.var_ref, app.var_file,
-                app.var_user, app.var_password, app.var_os_auth, app.var_enabled]:
+                app.var_user, app.var_password, app.var_os_auth, app.var_enabled,
+                app.var_dropper]:
         var.trace_add("write", mark_dirty)
     app.text_notes.bind("<KeyRelease>", lambda e: mark_dirty())
 

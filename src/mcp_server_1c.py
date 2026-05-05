@@ -771,6 +771,167 @@ def list_databases() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# execute_code — запись/изменение данных через файл-дроппер
+# ---------------------------------------------------------------------------
+#
+# Канал: Claude → этот инструмент → JSON в inbox-папке → 1С обработка
+# ИИ_Песочница читает inbox, выполняет код, пишет результат в done/errors.
+# Этот инструмент возвращает результат когда обработка его создаст,
+# либо отдаёт таймаут.
+
+import uuid
+import time as _time
+
+DEFAULT_DROPPER_TIMEOUT = 60  # секунд
+
+
+def get_dropper_path(db_key: str) -> Path:
+    """Папка дроппера для базы. Берётся либо из конфига базы (поле dropper_path),
+    либо строится по умолчанию: %LOCALAPPDATA%/1cMcpBridge/dropper/<db_key>.
+    """
+    cfg = DB_CONFIG["databases"].get(db_key, {})
+    custom = cfg.get("dropper_path", "").strip()
+    if custom:
+        return Path(custom)
+    local_app = os.environ.get("LOCALAPPDATA", "")
+    if not local_app:
+        local_app = str(Path.home() / "AppData" / "Local")
+    return Path(local_app) / "1cMcpBridge" / "dropper" / db_key
+
+
+@mcp.tool()
+def execute_code(
+    code_forward: str,
+    code_backward: str,
+    comment: str,
+    database: str | None = None,
+    timeout_seconds: int = DEFAULT_DROPPER_TIMEOUT,
+    request_screenshot: bool = False,
+) -> dict:
+    """Выполнить произвольный код 1С (в тестовой базе!) с записью в журнал ИИ_Действия.
+
+    Этот инструмент НЕ выполняет код напрямую через COM. Он кладёт JSON-задание
+    в папку inbox дроппера, и обработка ИИ_Песочница в 1С (которая должна быть
+    запущена пользователем и желательно в авто-режиме) выполнит код и положит
+    результат в done или errors.
+
+    БЕЗОПАСНОСТЬ:
+    - Используй только в БАЗАХ С МАРКЕРОМ [Тест] в названии. Если в базе нет
+      этого маркера, обработка покажет предупреждение, но всё равно выполнит код.
+    - Каждое выполнение оборачивается в транзакцию с автоматическим rollback
+      при ошибке.
+    - Все действия логируются в регистр сведений ИИ_Действия в самой 1С базе.
+    - code_backward — это компенсирующий код для отката. Он сохраняется в
+      регистре и пользователь может вручную запустить его через обработку
+      ИИ_Песочница если нужно.
+
+    КАК ВЕРНУТЬ ВЫВОД:
+    - В коде используй `ИИ_Сервер.Вывести("текст")` чтобы передать что-то
+      в результат. Можно вызывать многократно, строки склеятся через перевод.
+
+    Args:
+        code_forward: Код 1С для выполнения (на русском, как в Конфигураторе).
+        code_backward: Код для отката (компенсирующий). Можно пустую строку
+            если откат невозможен — но тогда отметь это в comment.
+        comment: Комментарий о том, что делает этот код. Попадёт в журнал.
+            Например: "Заполняю ИНН для контрагентов с пустым ИНН по списку".
+        database: Ключ базы из list_databases. Если None — база по умолчанию.
+        timeout_seconds: Сколько ждать ответа от 1С (по умолчанию 60).
+        request_screenshot: Если True — обработка попытается сохранить скриншот
+            экрана после выполнения (для проверки UI-результата).
+
+    Returns:
+        Структура с полями:
+            task_id: уникальный идентификатор задания
+            status: "success" / "runtime_error" / "rollback_failed" / "timeout"
+                / "rejected_by_safety"
+            output: что вернул код через ИИ_Сервер.Вывести()
+            error: текст ошибки если упало
+            duration_ms: сколько выполнялось
+            warnings: список предупреждений (например, что база не помечена [Тест])
+    """
+    if not code_forward or not code_forward.strip():
+        return {"error": "code_forward пустой"}
+
+    try:
+        db_key = resolve_database(database)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    dropper = get_dropper_path(db_key)
+    inbox = dropper / "inbox"
+    done = dropper / "done"
+    errors = dropper / "errors"
+
+    # Создаём папки если нет (могут быть созданы заранее, тут на всякий случай)
+    for folder in (inbox, done, errors):
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return {
+                "error": f"Не удалось создать папку дроппера {folder}: {e}",
+                "hint": "Убедись что путь к дропперу настроен правильно в Manager."
+            }
+
+    task_id = str(uuid.uuid4())
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{timestamp}-{task_id}.json"
+
+    task = {
+        "task_id": task_id,
+        "comment": comment,
+        "code_forward": code_forward,
+        "code_backward": code_backward,
+        "request_screenshot": request_screenshot,
+        "created_at": datetime.datetime.now().isoformat(),
+        "timeout_seconds": timeout_seconds,
+    }
+
+    task_file = inbox / filename
+    try:
+        task_file.write_text(
+            json.dumps(task, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        log.info("execute_code: положил задание %s в %s", task_id, task_file)
+    except Exception as e:
+        return {"error": f"Не удалось записать задание в inbox: {e}"}
+
+    # Ожидание результата — опрашиваем done и errors каждые 500мс
+    result_filename = f"{timestamp}-{task_id}.result.json"
+    deadline = _time.time() + timeout_seconds
+
+    while _time.time() < deadline:
+        for folder in (done, errors):
+            result_path = folder / result_filename
+            if result_path.exists():
+                try:
+                    result = json.loads(result_path.read_text(encoding="utf-8"))
+                    result["database"] = db_key
+                    return result
+                except Exception as e:
+                    return {
+                        "error": f"Не удалось прочитать result-файл: {e}",
+                        "task_id": task_id,
+                        "database": db_key,
+                    }
+        _time.sleep(0.5)
+
+    # Таймаут
+    return {
+        "task_id": task_id,
+        "status": "timeout",
+        "error": (
+            f"Прошло {timeout_seconds} секунд, обработка ИИ_Песочница не вернула результат. "
+            f"Проверь что обработка открыта в 1С и включён авто-режим, либо нажми "
+            f"«Выполнить выделенное» вручную."
+        ),
+        "task_file": str(task_file),
+        "database": db_key,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Постпатч описаний: дописываем _DB_BLOCK в description каждого tool'а
 # в реестре FastMCP. Это гарантирует, что Claude в tools/list увидит
 # список баз и notes — даже без первого вызова инструмента.
