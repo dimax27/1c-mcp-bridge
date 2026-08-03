@@ -46,6 +46,26 @@ try {
     $ProgID  = $params['PROGID']
     $ConnStr = $params['CONNSTR']
     $DllPath = $params['DLLPATH']
+    $ImportDbFile = $params['IMPORT_DB_FILE']
+
+    # If importing an existing databases.json, extract connection params from it
+    if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
+        Out "Импортирован databases.json: $ImportDbFile"
+        try {
+            $imported = Get-Content $ImportDbFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($imported.databases) {
+                $defaultKey = if ($imported.default_database) { $imported.default_database }
+                              else { ($imported.databases | Get-Member -MemberType NoteProperty)[0].Name }
+                $db = $imported.databases.$defaultKey
+                if ($db.progid) { $ProgID = $db.progid }
+                if ($db.connection_string) { $ConnStr = $db.connection_string }
+                if ($db.dll_path) { $DllPath = $db.dll_path }
+                Out "  (использую базу '$defaultKey' из импортированного файла)"
+            }
+        } catch {
+            Out "  (не удалось прочитать импортированный файл, использую параметры мастера)"
+        }
+    }
 
     if (-not $ProgID -or -not $ConnStr) {
         Out "ОШИБКА: пустые PROGID или CONNSTR."

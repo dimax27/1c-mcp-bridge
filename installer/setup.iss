@@ -639,7 +639,8 @@ begin
   SaveStringToFile(ParamsFile,
     'PROGID=' + GetSelectedProgID + #13#10 +
     'CONNSTR=' + BuildConnectionString + #13#10 +
-    'DLLPATH=' + GetSelectedDllPath + #13#10, False);
+    'DLLPATH=' + GetSelectedDllPath + #13#10 +
+    'IMPORT_DB_FILE=' + Trim(EditImportDbPath.Text) + #13#10, False);
 
   // Чистим прошлый output
   if FileExists(TmpFile) then DeleteFile(TmpFile);
