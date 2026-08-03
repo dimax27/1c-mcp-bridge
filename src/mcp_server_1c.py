@@ -38,7 +38,7 @@ from typing import Any
 import pythoncom
 import pywintypes
 import win32com.client
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 # На Windows stdout/stderr по умолчанию в cp1251 — MCP-клиенты пишут лог в
 # UTF-8. Принудительно перекодируем.
@@ -447,7 +447,7 @@ def parse_com_error(e: pywintypes.com_error) -> str:
 # MCP server + tools
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("1c-bridge")
+mcp = MCPServer("1c-bridge")
 
 # Описание баз — попадает в docstring каждого инструмента и AI-клиент видит его
 # в tools/list ДО первого вопроса от пользователя.
