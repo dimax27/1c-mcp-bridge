@@ -148,6 +148,12 @@ var
   LblUser, LblPwd:      TNewStaticText;
   LblOSAuthHint:        TNewStaticText;
 
+  // Импорт существующего databases.json
+  SeparatorImport:       TNewStaticText;
+  CheckImportDb:         TNewCheckBox;
+  EditImportDbPath:      TNewEdit;
+  BtnImportDbBrowse:     TNewButton;
+
   // Страница: проверка соединения
   PageTest:             TWizardPage;
   BtnTest:              TNewButton;
@@ -297,7 +303,9 @@ begin
 end;
 
 procedure UpdateAuthFields(Sender: TObject); forward;
+procedure UpdateImportFields(Sender: TObject); forward;
   procedure TestConnectionClick(Sender: TObject); forward;
+  procedure ImportDbBrowseClick(Sender: TObject); forward;
 
 procedure CreateConnectionParamsPage;
 var
@@ -433,6 +441,40 @@ begin
   EditPassword.Width := HalfW;
   EditPassword.Left := HalfW + 12;
   EditPassword.PasswordChar := '*';
+
+  // --- Импорт существующего databases.json ---
+  Y := Y + EditUser.Height + 12;
+  SeparatorImport := TNewStaticText.Create(PageConnectionParams);
+  SeparatorImport.Parent := PageConnectionParams.Surface;
+  SeparatorImport.Caption := '——————————————————————';
+  SeparatorImport.Top := Y;
+  SeparatorImport.Width := PageConnectionParams.SurfaceWidth;
+  Y := Y + SeparatorImport.Height + 4;
+
+  CheckImportDb := TNewCheckBox.Create(PageConnectionParams);
+  CheckImportDb.Parent := PageConnectionParams.Surface;
+  CheckImportDb.Caption := 'Импортировать существующий databases.json (пропустить ручной ввод)';
+  CheckImportDb.Top := Y;
+  CheckImportDb.Width := PageConnectionParams.SurfaceWidth;
+  CheckImportDb.OnClick := @UpdateImportFields;
+  Y := Y + CheckImportDb.Height + 6;
+
+  EditImportDbPath := TNewEdit.Create(PageConnectionParams);
+  EditImportDbPath.Parent := PageConnectionParams.Surface;
+  EditImportDbPath.Top := Y;
+  EditImportDbPath.Width := PageConnectionParams.SurfaceWidth - 100;
+  EditImportDbPath.Text := '';
+  EditImportDbPath.Enabled := False;
+
+  BtnImportDbBrowse := TNewButton.Create(PageConnectionParams);
+  BtnImportDbBrowse.Parent := PageConnectionParams.Surface;
+  BtnImportDbBrowse.Caption := 'Обзор...';
+  BtnImportDbBrowse.Top := Y;
+  BtnImportDbBrowse.Left := EditImportDbPath.Width + 8;
+  BtnImportDbBrowse.Width := 90;
+  BtnImportDbBrowse.Height := 22;
+  BtnImportDbBrowse.Enabled := False;
+  BtnImportDbBrowse.OnClick := @ImportDbBrowseClick;
 end;
 
 procedure UpdateAuthFields(Sender: TObject);
@@ -455,6 +497,27 @@ begin
   EditFileBasePath.Visible := not IsServer;
   LblServer.Visible := IsServer;  EditServerName.Visible := IsServer;
   LblRef.Visible    := IsServer;  EditRefName.Visible    := IsServer;
+end;
+
+procedure UpdateImportFields(Sender: TObject);
+var
+  Enable: Boolean;
+begin
+  Enable := CheckImportDb.Checked;
+  EditImportDbPath.Enabled := Enable;
+  BtnImportDbBrowse.Enabled := Enable;
+end;
+
+procedure ImportDbBrowseClick(Sender: TObject);
+var
+  FileName: String;
+begin
+  if GetOpenFileName('', FileName, '',
+    'JSON files (*.json)|*.json|All files|*.*',
+    'json') then
+  begin
+    EditImportDbPath.Text := FileName;
+  end;
 end;
 
 procedure CreateTestPage;
@@ -628,6 +691,17 @@ begin
 
   if CurPageID = PageConnectionParams.ID then
   begin
+    // Если импортируем готовый databases.json — пропускаем валидацию ручных полей
+    if CheckImportDb.Checked and (Trim(EditImportDbPath.Text) <> '') then
+    begin
+      if not FileExists(EditImportDbPath.Text) then
+      begin
+        MsgBox('Файл databases.json не найден по указанному пути.', mbError, MB_OK);
+        Result := False;
+      end;
+      Exit;
+    end;
+
     if not ValidateDbKey(Trim(EditDbKey.Text)) then
     begin
       MsgBox('Краткое имя базы должно содержать только латинские буквы, цифры и подчёркивание.',
@@ -680,7 +754,8 @@ begin
       'DBKEY='    + Trim(EditDbKey.Text) + #13#10 +
       'DBDESC='   + Trim(EditDbDescription.Text) + #13#10 +
       'APPDIR='   + ExpandConstant('{app}') + #13#10 +
-      'USERAPPDATA=' + ExpandConstant('{userappdata}') + #13#10,
+      'USERAPPDATA=' + ExpandConstant('{userappdata}') + #13#10 +
+      'IMPORT_DB_FILE=' + Trim(EditImportDbPath.Text) + #13#10,
       False);
   end;
 

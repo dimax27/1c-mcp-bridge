@@ -232,6 +232,7 @@ class ManagerApp(tk.Tk):
         toolbar = ttk.Frame(self, padding=(8, 6))
         toolbar.pack(fill=tk.X)
         ttk.Label(toolbar, text=f"Файл: {DB_FILE}", foreground="#666").pack(side=tk.LEFT)
+        ttk.Button(toolbar, text="Импорт из JSON", command=self._on_import).pack(side=tk.RIGHT, padx=2)
         ttk.Button(toolbar, text="Открыть в Notepad", command=self._open_in_editor).pack(side=tk.RIGHT, padx=2)
 
         # Основной paned: список слева, форма справа
@@ -545,6 +546,130 @@ class ManagerApp(tk.Tk):
                     return progid, p["dll_path"]
             return progid, ""
         return text.strip(), ""
+
+    # ----- Импорт из JSON (буфер обмена) -----
+    def _on_import(self):
+        """Открывает окно для вставки JSON-конфига баз из буфера обмена."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Импорт баз из JSON")
+        dialog.geometry("700x500")
+        dialog.minsize(500, 350)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Подсказка
+        hint = ttk.Label(
+            dialog,
+            text=(
+                "Вставьте JSON с настройками баз (Ctrl+V).\n"
+                "Можно вставить как полный databases.json, так и отдельную базу:\n"
+                '  • Полный: {"version":1, "databases": {"ut":{...}, "bp":{...}}}\n'
+                '  • Одна база: {"progid":"V83.COMConnector", "connection_string":"...", "description":"..."}'
+            ),
+            padding=(12, 8),
+            justify="left",
+        )
+        hint.pack(fill=tk.X)
+
+        # Текстовая область
+        text_frame = ttk.Frame(dialog, padding=(12, 4))
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        self._import_text = tk.Text(text_frame, font=("Consolas", 10), wrap="none")
+        self._import_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(text_frame, command=self._import_text.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._import_text.config(yscrollcommand=sb.set)
+
+        # Попробовать вставить из буфера
+        try:
+            clipboard = dialog.clipboard_get()
+            if clipboard and clipboard.strip().startswith("{"):
+                self._import_text.insert("1.0", clipboard.strip())
+        except Exception:
+            pass
+
+        # Кнопки
+        btn_frame = ttk.Frame(dialog, padding=(12, 8))
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(btn_frame, text="Импортировать", command=lambda: self._do_import(dialog)).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame, text="Отмена", command=dialog.destroy).pack(side=tk.RIGHT, padx=4)
+
+    def _do_import(self, dialog: tk.Toplevel):
+        """Парсит JSON и добавляет базы в конфиг."""
+        raw = self._import_text.get("1.0", "end-1c").strip()
+        if not raw:
+            messagebox.showerror("Ошибка", "Пустое поле.", parent=dialog)
+            return
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            messagebox.showerror("Ошибка", f"Неверный JSON:\n{e}", parent=dialog)
+            return
+
+        if not isinstance(data, dict):
+            messagebox.showerror("Ошибка", "JSON должен быть объектом {}.", parent=dialog)
+            return
+
+        imported = 0
+        skipped = 0
+
+        # Определяем формат: полный databases.json или одна база
+        if "databases" in data and isinstance(data["databases"], dict):
+            # Полный databases.json
+            for key, cfg in data["databases"].items():
+                if not isinstance(cfg, dict):
+                    skipped += 1
+                    continue
+                # Валидация обязательных полей
+                if not cfg.get("progid") or not cfg.get("connection_string"):
+                    skipped += 1
+                    continue
+                cfg.setdefault("description", key)
+                cfg.setdefault("notes", "")
+                cfg.setdefault("enabled", True)
+                self.config_data["databases"][key] = cfg
+                imported += 1
+            if data.get("default_database") and data["default_database"] in self.config_data["databases"]:
+                self.config_data["default_database"] = data["default_database"]
+        elif "progid" in data and "connection_string" in data:
+            # Одна база — спрашиваем ключ
+            from tkinter import simpledialog
+            key = simpledialog.askstring(
+                "Имя базы",
+                "Краткое имя для импортируемой базы (латиницей):",
+                parent=dialog,
+            )
+            if not key:
+                return
+            key = key.strip()
+            import re
+            if not re.match(r"^[a-zA-Z0-9_]+$", key):
+                messagebox.showerror("Ошибка", "Только латинские буквы, цифры, _.", parent=dialog)
+                return
+            data.setdefault("description", key)
+            data.setdefault("notes", "")
+            data.setdefault("enabled", True)
+            self.config_data["databases"][key] = data
+            imported += 1
+        else:
+            messagebox.showerror(
+                "Ошибка",
+                "JSON не содержит 'databases' (полный конфиг) и не содержит 'progid'+'connection_string' (одна база).",
+                parent=dialog,
+            )
+            return
+
+        save_config(self.config_data)
+        self._refresh_list()
+        self.dirty = False
+        dialog.destroy()
+
+        msg = f"Импортировано баз: {imported}"
+        if skipped:
+            msg += f"\nПропущено (невалидных): {skipped}"
+        self.status_var.set(msg)
+        messagebox.showinfo("Импорт", msg)
 
     # ----- Действия -----
     def _on_add(self):

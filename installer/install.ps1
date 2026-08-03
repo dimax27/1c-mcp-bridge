@@ -70,6 +70,7 @@ $ConnStr     = $params['CONNSTR']
 $DllPath     = $params['DLLPATH']
 $AppDir      = $params['APPDIR']
 $UserAppData = $params['USERAPPDATA']
+$ImportDbFile = $params['IMPORT_DB_FILE']
 
 Log "ProgID       = $ProgID"
 Log "ConnStr      = $($ConnStr -replace 'Pwd="[^"]*"', 'Pwd="***"')"
@@ -247,6 +248,38 @@ if (-not (Test-Path $DataDir)) {
 }
 $DatabasesFile = Join-Path $DataDir 'databases.json'
 
+# --- Импорт существующего databases.json (из мастера установки) ---
+if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
+    Log "Импортирую databases.json из $ImportDbFile ..."
+    try {
+        $importedJson = Get-Content $ImportDbFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        # Валидация: должен быть объект с ключом databases
+        if (-not $importedJson.databases) {
+            throw "Файл не содержит ключа 'databases'"
+        }
+        Copy-Item $ImportDbFile $DatabasesFile -Force
+        Log "Импортирован $DatabasesFile из $ImportDbFile"
+
+        # Права на запись
+        try {
+            $acl = Get-Acl $DatabasesFile
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                "Users", "FullControl", "Allow")
+            $acl.SetAccessRule($rule)
+            Set-Acl $DatabasesFile $acl
+            Log "Установлены права записи для группы Users."
+        } catch {
+            Log "Не удалось установить права на $DatabasesFile : $($_.Exception.Message)"
+        }
+    } catch {
+        Log "Ошибка импорта: $($_.Exception.Message). Создаю новую базу вручную."
+        $ImportDbFile = $null  # сбрасываем, чтобы сработал ручной ввод ниже
+    }
+}
+
+# Ручное создание (если не было импорта)
+if (-not $ImportDbFile -or -not (Test-Path $ImportDbFile)) {
+
 # Миграция со старого пути (v0.2.0-beta.1 и ранее)
 $LegacyFile = Join-Path $AppDir 'databases.json'
 if ((Test-Path $LegacyFile) -and -not (Test-Path $DatabasesFile)) {
@@ -313,6 +346,8 @@ if ((Test-Path $LegacyFile) -and ($LegacyFile -ne $DatabasesFile)) {
     Remove-Item $LegacyFile -Force -ErrorAction SilentlyContinue
     Log "Удалён старый $LegacyFile"
 }
+
+}  # конец блока ручного создания (если не было импорта)
 
 # -----------------------------------------------------------------------------
 # 7. Configure MCP clients (Claude, Qwen, Kimi, Reasonix)
