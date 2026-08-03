@@ -395,6 +395,9 @@ function ConvertTo-HashtableDeep {
 }
 
 foreach ($client in $MCPClients) {
+    try {
+    Log "Processing $($client.name)..."
+
     # Allow path override via environment variable
     $envVarName = "ONEC_$($client.id.ToUpper())_CONFIG"
     $envPath = [Environment]::GetEnvironmentVariable($envVarName)
@@ -481,6 +484,11 @@ foreach ($client in $MCPClients) {
     [System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))
     Log "$($client.name): config written - $ConfigPath"
     $ConfiguredClients += $client.name
+
+    } catch {
+        Log "$($client.name): ERROR - $($_.Exception.Message)"
+        $SkippedClients += "$($client.name) (error)"
+    }
 }
 
 # Summary
