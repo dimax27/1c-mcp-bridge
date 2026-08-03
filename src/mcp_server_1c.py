@@ -798,7 +798,7 @@ _patch_tool_descriptions()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Стартую 1C MCP Bridge v0.3.1")
+    log.info("Стартую 1C MCP Bridge v0.4.0")
     log.info("Файл со списком баз: %s", find_databases_file())
     log.info("Базы: %s", list_database_keys())
     log.info("По умолчанию: %s", DB_CONFIG["default_database"])
