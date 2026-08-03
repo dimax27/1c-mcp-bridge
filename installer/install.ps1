@@ -264,12 +264,17 @@ if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
         try {
             $acl = Get-Acl $DatabasesFile
             $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                "Users", "FullControl", "Allow")
+                "Users", "Modify", "Allow")
             $acl.SetAccessRule($rule)
             Set-Acl $DatabasesFile $acl
             Log "Установлены права записи для группы Users."
         } catch {
-            Log "Не удалось установить права на $DatabasesFile : $($_.Exception.Message)"
+            try {
+                & icacls $DatabasesFile /grant "Users:M" 2>&1 | Out-Null
+                Log "Права установлены через icacls."
+            } catch {
+                Log "Не удалось установить права: $($_.Exception.Message)"
+            }
         }
     } catch {
         Log "Ошибка импорта: $($_.Exception.Message). Создаю новую базу вручную."
@@ -334,12 +339,19 @@ Log "Записан $DatabasesFile (база '$DbKey')"
 try {
     $acl = Get-Acl $DatabasesFile
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "Users", "FullControl", "Allow")
+        "Users", "Modify", "Allow")
     $acl.SetAccessRule($rule)
     Set-Acl $DatabasesFile $acl
     Log "Установлены права записи для группы Users."
 } catch {
-    Log "Не удалось установить права на $DatabasesFile : $($_.Exception.Message)"
+    # Fallback: use icacls if .NET ACL fails (some Windows locales/versions)
+    Log "SetAccessRule failed, trying icacls..."
+    try {
+        & icacls $DatabasesFile /grant "Users:M" 2>&1 | Out-Null
+        Log "Права установлены через icacls."
+    } catch {
+        Log "Не удалось установить права: $($_.Exception.Message)"
+    }
 }
 
 # Удаляем legacy-файл (если был)
