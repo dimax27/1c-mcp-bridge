@@ -373,7 +373,6 @@ begin
   CheckImportDb.Top := Y;
   CheckImportDb.Width := PageConnectionParams.SurfaceWidth - 100;
   CheckImportDb.OnClick := @UpdateImportFields;
-  AddManualControl(CheckImportDb);
 
   BtnImportDbBrowse := TNewButton.Create(PageConnectionParams);
   BtnImportDbBrowse.Parent := PageConnectionParams.Surface;
@@ -384,7 +383,6 @@ begin
   BtnImportDbBrowse.Height := 22;
   BtnImportDbBrowse.Enabled := False;
   BtnImportDbBrowse.OnClick := @ImportDbBrowseClick;
-  AddManualControl(BtnImportDbBrowse);
 
   EditImportDbPath := TNewEdit.Create(PageConnectionParams);
   EditImportDbPath.Parent := PageConnectionParams.Surface;
