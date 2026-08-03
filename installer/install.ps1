@@ -478,7 +478,18 @@ foreach ($client in $MCPClients) {
         $config[$mcpKey] = $tmp
     }
 
-    $config[$mcpKey]['1c-bridge'] = $ServerEntry
+    # Qwen Desktop only allows npx/uvx as commands — use our npm launcher
+    if ($client.id -eq 'qwen') {
+        $config[$mcpKey]['1c-bridge'] = @{
+            command = 'npx'
+            args    = @( $AppDir )
+            env     = @{
+                ONEC_DATABASES_FILE = $DatabasesFile
+            }
+        }
+    } else {
+        $config[$mcpKey]['1c-bridge'] = $ServerEntry
+    }
 
     $json = $config | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))

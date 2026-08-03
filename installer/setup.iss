@@ -67,6 +67,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Сам сервер и его зависимости
 Source: "..\src\mcp_server_1c.py";       DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\clients_config.py";      DestDir: "{app}";              Flags: ignoreversion
+Source: "..\src\package.json";           DestDir: "{app}";              Flags: ignoreversion
+Source: "..\src\launcher.js";            DestDir: "{app}";              Flags: ignoreversion
 Source: "..\requirements.txt";           DestDir: "{app}";              Flags: ignoreversion
 Source: "..\LICENSE";                    DestDir: "{app}";              Flags: ignoreversion
 Source: "..\README.md";                  DestDir: "{app}";              Flags: ignoreversion
