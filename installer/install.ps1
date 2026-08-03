@@ -339,6 +339,26 @@ $ServerEntry = @{
 $ConfiguredClients = @()
 $SkippedClients = @()
 
+# Helper: recursively convert PSCustomObject to hashtable (PS 5.1 workaround)
+function ConvertTo-HashtableDeep {
+    param($obj)
+    if ($null -eq $obj) { return $null }
+    if ($obj -is [hashtable]) {
+        $ht = @{}
+        foreach ($k in $obj.Keys) { $ht[$k] = ConvertTo-HashtableDeep $obj[$k] }
+        return $ht
+    }
+    if ($obj -is [Array]) {
+        return @($obj | ForEach-Object { ConvertTo-HashtableDeep $_ })
+    }
+    if ($obj.GetType().Name -eq 'PSCustomObject') {
+        $ht = @{}
+        foreach ($p in $obj.PSObject.Properties) { $ht[$p.Name] = ConvertTo-HashtableDeep $p.Value }
+        return $ht
+    }
+    return $obj
+}
+
 foreach ($client in $MCPClients) {
     # Allow path override via environment variable
     $envVarName = "ONEC_$($client.id.ToUpper())_CONFIG"
@@ -397,6 +417,7 @@ foreach ($client in $MCPClients) {
         try {
             $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
             $config   = $jsonText | ConvertFrom-Json -AsHashtable
+            $config   = ConvertTo-HashtableDeep $config
         } catch {
             Log "$($client.name): parse error - $($_.Exception.Message). Making backup."
             Copy-Item $ConfigPath ($ConfigPath + '.bak.' + (Get-Date -Format 'yyyyMMddHHmmss')) -Force

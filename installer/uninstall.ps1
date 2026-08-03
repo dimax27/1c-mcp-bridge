@@ -47,6 +47,27 @@ $MCPClients = @(
     @{ dir = 'reasonix';      config = '.mcp.json'; subdir = 'global-workspace' }
 )
 
+
+# Helper: recursively convert PSCustomObject to hashtable (PS 5.1 workaround)
+function ConvertTo-HashtableDeep {
+    param($obj)
+    if ($null -eq $obj) { return $null }
+    if ($obj -is [hashtable]) {
+        $ht = @{}
+        foreach ($k in $obj.Keys) { $ht[$k] = ConvertTo-HashtableDeep $obj[$k] }
+        return $ht
+    }
+    if ($obj -is [Array]) {
+        return @($obj | ForEach-Object { ConvertTo-HashtableDeep $_ })
+    }
+    if ($obj.GetType().Name -eq 'PSCustomObject') {
+        $ht = @{}
+        foreach ($p in $obj.PSObject.Properties) { $ht[$p.Name] = ConvertTo-HashtableDeep $p.Value }
+        return $ht
+    }
+    return $obj
+}
+
 foreach ($client in $MCPClients) {
     if ($client.subdir) {
         $ConfigPath = Join-Path $AppData ($client.dir + '\' + $client.subdir + '\' + $client.config)
@@ -58,6 +79,7 @@ foreach ($client in $MCPClients) {
     try {
         $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
         $config   = $jsonText | ConvertFrom-Json -AsHashtable
+        $config   = ConvertTo-HashtableDeep $config
 
         $mcpKey = if ($client.mcp_key) { $client.mcp_key } else { 'mcpServers' }
 
