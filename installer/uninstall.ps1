@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Continue'
 # We need the interactive user's profile — try to find it.
 function Get-InteractiveAppData {
     if ($env:APPDATA) {
-        $clients = @('Claude', 'Qwen', 'Kimi', 'reasonix')
+        $clients = @('Claude', 'Qwen', 'kimi-desktop', 'reasonix')
         foreach ($c in $clients) {
             if (Test-Path (Join-Path $env:APPDATA $c)) { return $env:APPDATA }
         }
@@ -26,7 +26,7 @@ function Get-InteractiveAppData {
              Where-Object { $_.Name -notin @('Public','Default','Default User','All Users') }
     foreach ($u in $users) {
         $p = Join-Path $u.FullName 'AppData\Roaming'
-        foreach ($c in @('Claude\claude_desktop_config.json', 'Qwen\mcp_config.json', 'Kimi\mcp_config.json', 'reasonix\global-workspace\.mcp.json')) {
+        foreach ($c in @('Claude\claude_desktop_config.json', 'Qwen\settings.json', 'kimi-desktop\mcp_config.json', 'reasonix\global-workspace\.mcp.json')) {
             if (Test-Path (Join-Path $p $c)) { return $p }
         }
     }
@@ -41,10 +41,10 @@ if (-not $AppData) {
 
 # Supported MCP clients: dir, config filename
 $MCPClients = @(
-    @{ dir = 'Claude';   config = 'claude_desktop_config.json' },
-    @{ dir = 'Qwen';     config = 'mcp_config.json' },
-    @{ dir = 'Kimi';     config = 'mcp_config.json' },
-    @{ dir = 'reasonix'; config = '.mcp.json'; subdir = 'global-workspace' }
+    @{ dir = 'Claude';        config = 'claude_desktop_config.json' },
+    @{ dir = 'Qwen';          config = 'settings.json'; mcp_key = 'mcp_config' },
+    @{ dir = 'kimi-desktop';  config = 'mcp_config.json' },
+    @{ dir = 'reasonix';      config = '.mcp.json'; subdir = 'global-workspace' }
 )
 
 foreach ($client in $MCPClients) {
@@ -59,9 +59,11 @@ foreach ($client in $MCPClients) {
         $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
         $config   = $jsonText | ConvertFrom-Json -AsHashtable
 
-        if ($config.ContainsKey('mcpServers') -and $config.mcpServers -is [hashtable]) {
-            if ($config.mcpServers.ContainsKey('1c-bridge')) {
-                $config.mcpServers.Remove('1c-bridge')
+        $mcpKey = if ($client.mcp_key) { $client.mcp_key } else { 'mcpServers' }
+
+        if ($config.ContainsKey($mcpKey) -and $config[$mcpKey] -is [hashtable]) {
+            if ($config[$mcpKey].ContainsKey('1c-bridge')) {
+                $config[$mcpKey].Remove('1c-bridge')
                 Write-Host "Removed 1c-bridge from $($client.dir) config."
 
                 $json = $config | ConvertTo-Json -Depth 10

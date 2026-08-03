@@ -25,7 +25,7 @@ from typing import Any
 #   appdata_dir : folder name under %APPDATA% where the client keeps its files
 #   config_name : filename of the MCP servers config JSON
 #   exe_names   : candidate exe names for detection under %LOCALAPPDATA%
-#   download_url: where to get the app
+#   mcp_key     : JSON key for MCP servers (default: "mcpServers"; Qwen uses "mcp_config")
 # ---------------------------------------------------------------------------
 
 KNOWN_CLIENTS: list[dict[str, Any]] = [
@@ -45,10 +45,11 @@ KNOWN_CLIENTS: list[dict[str, Any]] = [
         "id": "qwen",
         "name": "Qwen Desktop",
         "appdata_dir": "Qwen",
-        "config_name": "mcp_config.json",
+        "config_name": "settings.json",
+        "mcp_key": "mcp_config",  # Qwen uses "mcp_config" not "mcpServers"
         "exe_names": [
-            "Programs/qwen-desktop/Qwen.exe",
             "Programs/Qwen/Qwen.exe",
+            "Programs/qwen-desktop/Qwen.exe",
             "Programs/qwen/Qwen.exe",
             "QwenDesktop/Qwen.exe",
         ],
@@ -57,7 +58,7 @@ KNOWN_CLIENTS: list[dict[str, Any]] = [
     {
         "id": "kimi",
         "name": "Kimi Desktop",
-        "appdata_dir": "Kimi",
+        "appdata_dir": "kimi-desktop",
         "config_name": "mcp_config.json",
         "exe_names": [
             "Programs/kimi-desktop/Kimi.exe",
@@ -168,23 +169,29 @@ def write_client_config(client: dict, config: dict) -> None:
     path.write_text(raw, encoding="utf-8")
 
 
+def _mcp_key(client: dict) -> str:
+    """Return the JSON key for MCP servers in this client's config."""
+    return client.get("mcp_key", "mcpServers")
+
+
 def update_mcp_servers(client: dict, server_name: str, server_entry: dict) -> bool:
     """Add or update an MCP server entry in a client's config.
 
     Returns True if the config was created or updated.
     """
     config = read_client_config(client)
+    key = _mcp_key(client)
 
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
-    if not isinstance(config["mcpServers"], dict):
-        config["mcpServers"] = {}
+    if key not in config:
+        config[key] = {}
+    if not isinstance(config[key], dict):
+        config[key] = {}
 
-    existing = config["mcpServers"].get(server_name)
+    existing = config[key].get(server_name)
     if existing == server_entry:
         return False  # No change needed
 
-    config["mcpServers"][server_name] = server_entry
+    config[key][server_name] = server_entry
     write_client_config(client, config)
     return True
 
@@ -195,7 +202,8 @@ def remove_mcp_server(client: dict, server_name: str) -> bool:
     Returns True if the entry was found and removed.
     """
     config = read_client_config(client)
-    servers = config.get("mcpServers")
+    key = _mcp_key(client)
+    servers = config.get(key)
     if not isinstance(servers, dict):
         return False
     if server_name not in servers:

@@ -322,10 +322,10 @@ Stage "Configuring MCP clients"
 # List of supported MCP clients
 # Each client: id, name, dir (under %APPDATA%), config filename, optional subdir
 $MCPClients = @(
-    @{ id = 'claude';   name = 'Claude Desktop';    dir = 'Claude';   config = 'claude_desktop_config.json' },
-    @{ id = 'qwen';     name = 'Qwen Desktop';      dir = 'Qwen';     config = 'mcp_config.json' },
-    @{ id = 'kimi';     name = 'Kimi Desktop';      dir = 'Kimi';     config = 'mcp_config.json' },
-    @{ id = 'reasonix'; name = 'Reasonix';          dir = 'reasonix'; config = '.mcp.json'; subdir = 'global-workspace' }
+    @{ id = 'claude';   name = 'Claude Desktop';    dir = 'Claude';        config = 'claude_desktop_config.json' },
+    @{ id = 'qwen';     name = 'Qwen Desktop';      dir = 'Qwen';          config = 'settings.json'; mcp_key = 'mcp_config' },
+    @{ id = 'kimi';     name = 'Kimi Desktop';      dir = 'kimi-desktop';  config = 'mcp_config.json' },
+    @{ id = 'reasonix'; name = 'Reasonix';          dir = 'reasonix';      config = '.mcp.json'; subdir = 'global-workspace' }
 )
 
 $ServerEntry = @{
@@ -407,16 +407,19 @@ foreach ($client in $MCPClients) {
         $config = @{}
     }
 
-    if (-not $config.ContainsKey('mcpServers')) {
-        $config['mcpServers'] = @{}
+    # Determine the JSON key for MCP servers (Qwen uses "mcp_config", others use "mcpServers")
+    $mcpKey = if ($client.mcp_key) { $client.mcp_key } else { 'mcpServers' }
+
+    if (-not $config.ContainsKey($mcpKey)) {
+        $config[$mcpKey] = @{}
     }
-    if ($config.mcpServers -isnot [hashtable]) {
+    if ($config[$mcpKey] -isnot [hashtable]) {
         $tmp = @{}
-        foreach ($p in $config.mcpServers.PSObject.Properties) { $tmp[$p.Name] = $p.Value }
-        $config.mcpServers = $tmp
+        foreach ($p in $config[$mcpKey].PSObject.Properties) { $tmp[$p.Name] = $p.Value }
+        $config[$mcpKey] = $tmp
     }
 
-    $config.mcpServers['1c-bridge'] = $ServerEntry
+    $config[$mcpKey]['1c-bridge'] = $ServerEntry
 
     $json = $config | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))

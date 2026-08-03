@@ -75,10 +75,10 @@ Write-Host ""
 Write-Host "=== MCP Desktop Clients ===" -ForegroundColor Cyan
 
 $clients = @(
-    @{ name = 'Claude Desktop'; dir = 'Claude';   config = 'claude_desktop_config.json'; url = 'https://claude.ai/download' },
-    @{ name = 'Qwen Desktop';   dir = 'Qwen';     config = 'mcp_config.json';            url = 'https://www.qianwenai.com/agents/qwen' },
-    @{ name = 'Kimi Desktop';   dir = 'Kimi';     config = 'mcp_config.json';            url = 'https://kimi.moonshot.cn' },
-    @{ name = 'Reasonix';       dir = 'reasonix'; config = '.mcp.json'; subdir = 'global-workspace'; url = 'https://reasonix.ai' }
+    @{ name = 'Claude Desktop'; dir = 'Claude';        config = 'claude_desktop_config.json'; url = 'https://claude.ai/download' },
+    @{ name = 'Qwen Desktop';   dir = 'Qwen';          config = 'settings.json';              url = 'https://www.qianwenai.com/agents/qwen' },
+    @{ name = 'Kimi Desktop';   dir = 'kimi-desktop';  config = 'mcp_config.json';            url = 'https://kimi.moonshot.cn' },
+    @{ name = 'Reasonix';       dir = 'reasonix';      config = '.mcp.json'; subdir = 'global-workspace'; url = 'https://reasonix.ai' }
 )
 
 foreach ($c in $clients) {
