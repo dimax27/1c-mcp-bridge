@@ -379,6 +379,7 @@ $MCPClients = @(
 $ServerEntry = @{
     command = $VenvPython
     args    = @( (Join-Path $AppDir 'mcp_server_1c.py') )
+    transportType = 'stdio'
     env     = @{
         ONEC_DATABASES_FILE = $DatabasesFile
     }
