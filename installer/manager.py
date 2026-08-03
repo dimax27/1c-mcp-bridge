@@ -5,6 +5,8 @@
     pythonw.exe manager.py            (без чёрного окна консоли)
     python.exe  manager.py            (с консолью — для отладки)
 
+Поддерживаемые MCP-клиенты: Claude Desktop, Qwen Desktop, Kimi Desktop, Reasonix.
+
 Layout:
     +--------------------+----------------------------------+
     | [+] [-] [по умолч] | Краткое имя:  [_______________] |
@@ -16,7 +18,7 @@ Layout:
     |                    | Имя ИБ:       [_______________] |
     |                    | [✓] Аутентификация Windows      |
     |                    | Логин/Пароль: ...               |
-    |                    | Заметки для Claude:             |
+    |                    | Заметки для AI:                 |
     |                    | ┌─────────────────────────────┐ |
     |                    | │ Что в этой базе можно найти │ |
     |                    | └─────────────────────────────┘ |
@@ -268,7 +270,7 @@ class ManagerApp(tk.Tk):
         enabled_frame.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 8))
         ttk.Checkbutton(
             enabled_frame,
-            text="Использовать эту базу (если снять — Claude её не увидит, но запись остаётся)",
+            text="Использовать эту базу (если снять — AI-клиент её не увидит, но запись остаётся)",
             variable=self.var_enabled
         ).pack(side=tk.LEFT)
         row += 1
@@ -354,7 +356,7 @@ class ManagerApp(tk.Tk):
         row += 1
 
         # Notes — большой Text
-        ttk.Label(right, text="Заметки для Claude\n(что в этой базе):",
+        ttk.Label(right, text="Заметки для AI\n(что в этой базе):",
                   anchor="w", justify="left").grid(row=row, column=0, sticky="nw", pady=(8, 2))
         self.text_notes = scrolledtext.ScrolledText(right, height=6, wrap=tk.WORD, font=("Segoe UI", 9))
         self.text_notes.grid(row=row, column=1, columnspan=2, sticky="ewns", pady=(8, 2))
@@ -378,8 +380,8 @@ class ManagerApp(tk.Tk):
                           relief=tk.SUNKEN, padding=(8, 2))
         status.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # Подсказка про перезапуск Claude Desktop
-        hint = ttk.Label(self, text="После любых изменений нужно перезапустить Claude Desktop (Quit из трея → запустить снова).",
+        # Подсказка про перезапуск MCP-клиента
+        hint = ttk.Label(self, text="После любых изменений нужно перезапустить ваш MCP-клиент (Quit/Выйти → запустить снова).",
                         foreground="#a05a00", padding=(8, 4))
         hint.pack(fill=tk.X, side=tk.BOTTOM)
 
@@ -645,12 +647,13 @@ class ManagerApp(tk.Tk):
             self.listbox.selection_clear(0, tk.END)
             self.listbox.selection_set(keys.index(key))
 
-        self.status_var.set(f"База '{key}' сохранена. Перезапусти Claude Desktop.")
+        self.status_var.set(f"База '{key}' сохранена. Перезапустите MCP-клиент.")
         messagebox.showinfo(
             "Сохранено",
             f"База '{key}' сохранена.\n\n"
-            "Чтобы изменения вступили в силу — перезапусти Claude Desktop:\n"
-            "  правый клик по иконке в трее → Quit → запустить снова."
+            "Чтобы изменения вступили в силу — перезапустите ваш MCP-клиент:\n"
+            "  Claude Desktop: правый клик по иконке в трее → Quit → запустить снова.\n"
+            "  Qwen / Kimi Desktop: закрыть приложение и запустить заново."
         )
 
     def _on_test(self):

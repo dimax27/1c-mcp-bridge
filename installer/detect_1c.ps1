@@ -72,11 +72,31 @@ try {
 }
 
 Write-Host ""
-Write-Host "=== Claude Desktop ===" -ForegroundColor Cyan
-$claudeConfig = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'
-if (Test-Path $claudeConfig) {
-    Write-Host "Конфиг: $claudeConfig"
-} else {
-    Write-Host "Claude Desktop не запускался ни разу или не установлен." -ForegroundColor Yellow
-    Write-Host "Скачать: https://claude.ai/download"
+Write-Host "=== MCP Desktop Clients ===" -ForegroundColor Cyan
+
+$clients = @(
+    @{ name = 'Claude Desktop'; dir = 'Claude';   config = 'claude_desktop_config.json'; url = 'https://claude.ai/download' },
+    @{ name = 'Qwen Desktop';   dir = 'Qwen';     config = 'mcp_config.json';            url = 'https://www.qianwenai.com/agents/qwen' },
+    @{ name = 'Kimi Desktop';   dir = 'Kimi';     config = 'mcp_config.json';            url = 'https://kimi.moonshot.cn' },
+    @{ name = 'Reasonix';       dir = 'reasonix'; config = '.mcp.json'; subdir = 'global-workspace'; url = 'https://reasonix.ai' }
+)
+
+foreach ($c in $clients) {
+    if ($c.subdir) {
+        $configPath = Join-Path $env:APPDATA "$($c.dir)\$($c.subdir)\$($c.config)"
+    } else {
+        $configPath = Join-Path $env:APPDATA "$($c.dir)\$($c.config)"
+    }
+    $dirPath    = Join-Path $env:APPDATA $c.dir
+    $hasConfig  = Test-Path $configPath
+    $hasDir     = Test-Path $dirPath
+
+    if ($hasConfig) {
+        Write-Host "  $($c.name): found (config: $configPath)" -ForegroundColor Green
+    } elseif ($hasDir) {
+        Write-Host "  $($c.name): dir exists, no config - never launched" -ForegroundColor Yellow
+    } else {
+        Write-Host "  $($c.name): not installed" -ForegroundColor DarkGray
+        Write-Host "    Download: $($c.url)"
+    }
 }

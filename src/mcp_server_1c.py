@@ -1,9 +1,9 @@
 """
-1C MCP Bridge — сервер MCP для подключения Claude к 1С:Предприятию через COM.
+1C MCP Bridge — MCP-сервер для подключения AI-ассистентов к 1С:Предприятию через COM.
 
-v0.2.0: поддержка нескольких информационных баз. Список баз хранится в
-databases.json (рядом с этим скриптом или в пути, заданном переменной
-ONEC_DATABASES_FILE). Каждый из четырёх инструментов принимает опциональный
+v0.3.0: поддержка нескольких MCP-клиентов (Claude Desktop, Qwen Desktop, Kimi Desktop).
+Список баз хранится в databases.json (рядом с этим скриптом или в пути, заданном
+переменной ONEC_DATABASES_FILE). Каждый из инструментов принимает опциональный
 параметр `database` — ключ из списка. При отсутствии параметра используется
 default_database из конфига.
 
@@ -40,7 +40,7 @@ import pywintypes
 import win32com.client
 from mcp.server.fastmcp import FastMCP
 
-# На Windows stdout/stderr по умолчанию в cp1251 — Claude Desktop пишет лог в
+# На Windows stdout/stderr по умолчанию в cp1251 — MCP-клиенты пишут лог в
 # UTF-8. Принудительно перекодируем.
 if sys.platform == "win32":
     try:
@@ -128,7 +128,7 @@ def load_databases() -> dict:
         cfg.setdefault("notes", "")
         cfg.setdefault("enabled", True)
 
-    # Фильтруем отключённые — Claude их вообще не должен видеть
+    # Фильтруем отключённые — AI-клиенты их вообще не должны видеть
     enabled_databases = {k: v for k, v in databases.items() if v.get("enabled", True)}
     if not enabled_databases:
         raise RuntimeError(
@@ -148,7 +148,7 @@ def load_databases() -> dict:
 
 
 # Загружаем единожды при старте; перечитывать на лету не будем — переустановка
-# всё равно требует перезапуска Claude Desktop.
+# всё равно требует перезапуска MCP-клиента.
 try:
     DB_CONFIG = load_databases()
 except Exception as e:
@@ -162,8 +162,8 @@ def list_database_keys() -> list[str]:
 
 
 def get_db_descriptions() -> str:
-    """Полное описание баз для подсказки Claude в tools/list.
-    Включает короткое description и длинные notes (если есть) — Claude
+    """Полное описание баз для подсказки AI в tools/list.
+    Включает короткое description и длинные notes (если есть) — AI-клиент
     увидит заметки до того как пользователь задаст вопрос, и сможет
     осознанно выбирать в какую базу обращаться.
     """
@@ -449,7 +449,7 @@ def parse_com_error(e: pywintypes.com_error) -> str:
 
 mcp = FastMCP("1c-bridge")
 
-# Описание баз — попадает в docstring каждого инструмента и Claude видит его
+# Описание баз — попадает в docstring каждого инструмента и AI-клиент видит его
 # в tools/list ДО первого вопроса от пользователя.
 _DB_BLOCK = "\n\n" + get_db_descriptions() + "\n"
 
@@ -772,7 +772,7 @@ def list_databases() -> dict:
 
 # ---------------------------------------------------------------------------
 # Постпатч описаний: дописываем _DB_BLOCK в description каждого tool'а
-# в реестре FastMCP. Это гарантирует, что Claude в tools/list увидит
+# в реестре FastMCP. Это гарантирует, что AI-клиент в tools/list увидит
 # список баз и notes — даже без первого вызова инструмента.
 # ---------------------------------------------------------------------------
 
@@ -798,7 +798,7 @@ _patch_tool_descriptions()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Стартую 1C MCP Bridge v0.2.0")
+    log.info("Стартую 1C MCP Bridge v0.3.0")
     log.info("Файл со списком баз: %s", find_databases_file())
     log.info("Базы: %s", list_database_keys())
     log.info("По умолчанию: %s", DB_CONFIG["default_database"])

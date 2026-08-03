@@ -315,44 +315,20 @@ if ((Test-Path $LegacyFile) -and ($LegacyFile -ne $DatabasesFile)) {
 }
 
 # -----------------------------------------------------------------------------
-# 7. claude_desktop_config.json
+# 7. Configure MCP clients (Claude, Qwen, Kimi, Reasonix)
 # -----------------------------------------------------------------------------
-Stage "Конфигурирование Claude Desktop"
-$ClaudeDir    = Join-Path $UserAppData 'Claude'
-$ConfigPath   = Join-Path $ClaudeDir 'claude_desktop_config.json'
+Stage "Configuring MCP clients"
 
-if (-not (Test-Path $ClaudeDir)) {
-    Log "Папка $ClaudeDir не найдена — Claude Desktop ещё не запускался ни разу."
-    Log "Создаю папку и кладу конфиг — Claude подхватит при первом запуске."
-    New-Item -ItemType Directory -Path $ClaudeDir -Force | Out-Null
-}
+# List of supported MCP clients
+# Each client: id, name, dir (under %APPDATA%), config filename, optional subdir
+$MCPClients = @(
+    @{ id = 'claude';   name = 'Claude Desktop';    dir = 'Claude';   config = 'claude_desktop_config.json' },
+    @{ id = 'qwen';     name = 'Qwen Desktop';      dir = 'Qwen';     config = 'mcp_config.json' },
+    @{ id = 'kimi';     name = 'Kimi Desktop';      dir = 'Kimi';     config = 'mcp_config.json' },
+    @{ id = 'reasonix'; name = 'Reasonix';          dir = 'reasonix'; config = '.mcp.json'; subdir = 'global-workspace' }
+)
 
-if (Test-Path $ConfigPath) {
-    Log "Найден существующий config — обновляю блок 1c-bridge."
-    try {
-        $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
-        $config   = $jsonText | ConvertFrom-Json -AsHashtable
-    } catch {
-        Log "Не удалось распарсить существующий config: $($_.Exception.Message)"
-        Log "Делаю backup и создаю новый."
-        Copy-Item $ConfigPath ($ConfigPath + '.bak.' + (Get-Date -Format 'yyyyMMddHHmmss')) -Force
-        $config = @{}
-    }
-} else {
-    $config = @{}
-}
-
-if (-not $config.ContainsKey('mcpServers')) {
-    $config['mcpServers'] = @{}
-}
-if ($config.mcpServers -isnot [hashtable]) {
-    $tmp = @{}
-    foreach ($p in $config.mcpServers.PSObject.Properties) { $tmp[$p.Name] = $p.Value }
-    $config.mcpServers = $tmp
-}
-
-# В v0.2.0 — указываем путь к databases.json через переменную окружения
-$config.mcpServers['1c-bridge'] = @{
+$ServerEntry = @{
     command = $VenvPython
     args    = @( (Join-Path $AppDir 'mcp_server_1c.py') )
     env     = @{
@@ -360,9 +336,104 @@ $config.mcpServers['1c-bridge'] = @{
     }
 }
 
-$json = $config | ConvertTo-Json -Depth 10
-[System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))
-Log "Конфиг обновлён: $ConfigPath"
+$ConfiguredClients = @()
+$SkippedClients = @()
+
+foreach ($client in $MCPClients) {
+    # Allow path override via environment variable
+    $envVarName = "ONEC_$($client.id.ToUpper())_CONFIG"
+    $envPath = [Environment]::GetEnvironmentVariable($envVarName)
+    if ($envPath) {
+        $ConfigPath = $envPath
+        $ConfigDir = Split-Path $ConfigPath -Parent
+    } else {
+        if ($client.subdir) {
+            $ConfigDir  = Join-Path $UserAppData $client.dir | Join-Path -ChildPath $client.subdir
+        } else {
+            $ConfigDir  = Join-Path $UserAppData $client.dir
+        }
+        $ConfigPath = Join-Path $ConfigDir $client.config
+    }
+
+    # Detect if client is installed
+    $clientInstalled = $false
+    if (Test-Path $ConfigPath) {
+        $clientInstalled = $true
+        Log "$($client.name): found config $ConfigPath"
+    } elseif (Test-Path $ConfigDir) {
+        $clientInstalled = $true
+        Log "$($client.name): found dir $ConfigDir (no config yet)"
+    } else {
+        # Check for exe in LocalAppData
+        $localExeDirs = @(
+            Join-Path $env:LOCALAPPDATA "Programs\$($client.id)-desktop",
+            Join-Path $env:LOCALAPPDATA "Programs\$($client.id)",
+            Join-Path $env:LOCALAPPDATA $client.dir
+        )
+        foreach ($d in $localExeDirs) {
+            if (Test-Path $d) {
+                $clientInstalled = $true
+                Log "$($client.name): found $d"
+                break
+            }
+        }
+    }
+
+    if (-not $clientInstalled) {
+        Log "$($client.name): not found - skipping."
+        $SkippedClients += $client.name
+        continue
+    }
+
+    # Create config dir if needed
+    if (-not (Test-Path $ConfigDir)) {
+        New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+        Log "$($client.name): created dir $ConfigDir"
+    }
+
+    # Read or create config
+    if (Test-Path $ConfigPath) {
+        Log "$($client.name): updating existing config."
+        try {
+            $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
+            $config   = $jsonText | ConvertFrom-Json -AsHashtable
+        } catch {
+            Log "$($client.name): parse error - $($_.Exception.Message). Making backup."
+            Copy-Item $ConfigPath ($ConfigPath + '.bak.' + (Get-Date -Format 'yyyyMMddHHmmss')) -Force
+            $config = @{}
+        }
+    } else {
+        Log "$($client.name): creating new config."
+        $config = @{}
+    }
+
+    if (-not $config.ContainsKey('mcpServers')) {
+        $config['mcpServers'] = @{}
+    }
+    if ($config.mcpServers -isnot [hashtable]) {
+        $tmp = @{}
+        foreach ($p in $config.mcpServers.PSObject.Properties) { $tmp[$p.Name] = $p.Value }
+        $config.mcpServers = $tmp
+    }
+
+    $config.mcpServers['1c-bridge'] = $ServerEntry
+
+    $json = $config | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($ConfigPath, $json, [System.Text.UTF8Encoding]::new($false))
+    Log "$($client.name): config written - $ConfigPath"
+    $ConfiguredClients += $client.name
+}
+
+# Summary
+if ($ConfiguredClients.Count -gt 0) {
+    Log "Configured clients: $($ConfiguredClients -join ', ')"
+} else {
+    Log "WARNING: no MCP clients found."
+    Log "1C Bridge is installed, but you need at least one MCP client:"
+    foreach ($c in $MCPClients) {
+        Log "  - $($c.name): download at $($c.id).ai or moonshot.cn"
+    }
+}
 
 # -----------------------------------------------------------------------------
 $bar = "=" * 70

@@ -1,6 +1,7 @@
 ; =============================================================================
 ;  1C MCP Bridge — установщик
-;  Связывает Claude Desktop с 1С:Предприятием через COM-коннектор и MCP.
+;  Связывает AI-ассистентов (Claude, Qwen, Kimi, Reasonix) с 1С:Предприятием через
+;  COM-коннектор и MCP.
 ;
 ;  Сборка:
 ;    iscc setup.iss
@@ -35,7 +36,7 @@ AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
 AppCopyright={#MyAppCopyright}
 AppContact=Koovykin D.
-AppComments=MCP-сервер для подключения Claude Desktop к 1С:Предприятию через COM-коннектор
+AppComments=MCP-сервер для подключения AI-ассистентов (Claude, Qwen, Kimi, Reasonix) к 1С:Предприятию через COM-коннектор
 VersionInfoVersion={#NumericPart}.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
@@ -65,6 +66,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 ; Сам сервер и его зависимости
 Source: "..\src\mcp_server_1c.py";       DestDir: "{app}";              Flags: ignoreversion
+Source: "..\src\clients_config.py";      DestDir: "{app}";              Flags: ignoreversion
 Source: "..\requirements.txt";           DestDir: "{app}";              Flags: ignoreversion
 Source: "..\LICENSE";                    DestDir: "{app}";              Flags: ignoreversion
 Source: "..\README.md";                  DestDir: "{app}";              Flags: ignoreversion
@@ -684,7 +686,7 @@ begin
 
   if CurStep = ssPostInstall then
   begin
-    // Проверяем, установлен ли Claude Desktop
+    // Проверяем, установлен ли хотя бы один MCP-клиент
     ClaudeFound := False;
     ClaudeExe := ExpandConstant('{localappdata}\AnthropicClaude\Claude.exe');
     if FileExists(ClaudeExe) then ClaudeFound := True;
@@ -695,7 +697,6 @@ begin
     end;
     if not ClaudeFound then
     begin
-      // Косвенный признак: папка %APPDATA%\Claude
       if DirExists(ExpandConstant('{userappdata}\Claude')) then
         ClaudeFound := True;
     end;
@@ -703,20 +704,23 @@ begin
     if ClaudeFound then
     begin
       Msg := 'Установка завершена.' + #13#10 + #13#10 +
-             'Чтобы Claude Desktop увидел MCP-сервер 1C Bridge, его нужно полностью перезапустить:' + #13#10 +
-             '  1. Правый клик по иконке Claude в системном трее (рядом с часами).' + #13#10 +
-             '  2. Выбери Quit (или "Выйти").' + #13#10 +
-             '  3. Запусти Claude Desktop снова.' + #13#10 + #13#10 +
-             'В новом чате внизу появится индикатор инструментов с сервером 1c-bridge ' +
-             'и четырьмя инструментами (execute_query, describe_object, list_metadata, get_object_by_ref).';
+             'Чтобы AI-ассистент увидел MCP-сервер 1C Bridge, его нужно полностью перезапустить:' + #13#10 +
+             '  1. Claude Desktop: правый клик по иконке в трее → Quit → запустить снова.' + #13#10 +
+             '  2. Qwen / Kimi Desktop: закрыть приложение и запустить заново.' + #13#10 +
+             '  3. Reasonix: перезапустить приложение.' + #13#10 + #13#10 +
+             'В новом чате появится индикатор инструментов с сервером 1c-bridge ' +
+             'и пятью инструментами (execute_query, describe_object, list_metadata, get_object_by_ref, list_databases).';
       MsgBox(Msg, mbInformation, MB_OK);
     end
     else
     begin
-      Msg := 'Установка завершена, но Claude Desktop на этом компьютере не обнаружен.' + #13#10 + #13#10 +
-             'Чтобы пользоваться 1C MCP Bridge, скачайте и установите Claude Desktop:' + #13#10 +
-             '  https://claude.ai/download' + #13#10 + #13#10 +
-             'После первого запуска Claude Desktop конфигурация сервера 1c-bridge подхватится автоматически.';
+      Msg := 'Установка завершена, но MCP-клиент на этом компьютере не обнаружен.' + #13#10 + #13#10 +
+             'Чтобы пользоваться 1C MCP Bridge, установите один из MCP-клиентов:' + #13#10 +
+             '  • Claude Desktop: https://claude.ai/download' + #13#10 +
+             '  • Qwen Desktop:  https://www.qianwenai.com/agents/qwen' + #13#10 +
+             '  • Kimi Desktop:  https://kimi.moonshot.cn' + #13#10 +
+             '  • Reasonix:      https://reasonix.ai' + #13#10 + #13#10 +
+             'После первого запуска приложения конфигурация сервера 1c-bridge подхватится автоматически.';
       MsgBox(Msg, mbInformation, MB_OK);
     end;
   end;
