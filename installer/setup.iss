@@ -67,7 +67,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Сам сервер и его зависимости
 Source: "..\src\mcp_server_1c.py";       DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\mcp_server_1c_http.py";  DestDir: "{app}";              Flags: ignoreversion
-Source: "..\src\start_1c_bridge_http.pyw"; DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\clients_config.py";      DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\package.json";           DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\launcher.js";            DestDir: "{app}";              Flags: ignoreversion
@@ -96,11 +95,11 @@ Name: "{group}\1C Bridge Manager"; \
   IconFilename: "{app}\assets\icon.ico"; \
   Comment: "Управление списком информационных баз 1С"
 Name: "{group}\1C Bridge (HTTP-сервер для Qwen)"; \
-  Filename: "{app}\.venv\Scripts\pythonw.exe"; \
-  Parameters: """{app}\start_1c_bridge_http.pyw"""; \
+  Filename: "wscript.exe"; \
+  Parameters: """{app}\start_1c_bridge_silent.vbs"""; \
   WorkingDir: "{app}"; \
   IconFilename: "{app}\assets\icon.ico"; \
-  Comment: "Запускает HTTP-сервер для Qwen Desktop (без окна консоли). Остановка — Диспетчер задач → pythonw.exe"
+  Comment: "Запускает HTTP-сервер для Qwen Desktop (без окна). Остановка — Диспетчер задач → python.exe"
 Name: "{group}\Открыть папку установки"; Filename: "{app}"
 Name: "{group}\Удалить {#MyAppName}";    Filename: "{uninstallexe}"
 Name: "{group}\Документация";            Filename: "{#MyAppURL}"

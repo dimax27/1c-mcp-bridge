@@ -394,6 +394,14 @@ if not defined ONEC_DATABASES_FILE set ONEC_DATABASES_FILE=$DatabasesFile
 [System.IO.File]::WriteAllText($NpxLauncherCmd, $launcherCmd, [System.Text.UTF8Encoding]::new($false))
 Log "Created npx launcher in $NpxDir"
 
+# --- Create silent VBS launcher for Qwen HTTP server (no console) ---
+$VbsLauncher = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
+$vbsContent = @"
+CreateObject("Wscript.Shell").Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000", 0, False
+"@
+[System.IO.File]::WriteAllText($VbsLauncher, $vbsContent, [System.Text.ASCIIEncoding]::new())
+Log "Created silent VBS launcher in $AppDir"
+
 # List of supported MCP clients
 # Each client: id, name, dir (under %APPDATA%), config filename, optional subdir
 $MCPClients = @(
