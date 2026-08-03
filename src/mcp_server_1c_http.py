@@ -238,7 +238,7 @@ async def handle_mcp(request):
     from mcp.server.streamable_http import StreamableHTTPServerTransport
     transport = StreamableHTTPServerTransport("/mcp")
     async with transport.connect() as (read_stream, write_stream):
-        await mcp.run(read_stream, write_stream, mcp.create_initialization_options())
+        await mcp.run(read_stream, write_stream)
     return Response(status_code=200)
 
 async def health(request):
