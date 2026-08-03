@@ -1,9 +1,9 @@
 {
     "name": "1c-mcp-bridge-launcher",
     "version": "1.0.0",
-    "description": "Launcher for 1C MCP Bridge — spawns the Python MCP server",
+    "description": "Launch 1C MCP Bridge Python server from npx",
     "bin": {
-        "1c-bridge": "./launcher.js"
+        "1c-bridge": "./launcher.cmd"
     },
     "private": true
 }

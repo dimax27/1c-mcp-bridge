@@ -367,6 +367,33 @@ if ((Test-Path $LegacyFile) -and ($LegacyFile -ne $DatabasesFile)) {
 # -----------------------------------------------------------------------------
 Stage "Configuring MCP clients"
 
+# --- Setup npm launcher for Qwen (no spaces in path) ---
+$NpxDir = Join-Path $env:PROGRAMDATA '1cMcpBridge'
+$NpxPackageJson = Join-Path $NpxDir 'package.json'
+$NpxLauncherCmd = Join-Path $NpxDir 'launcher.cmd'
+
+# Write package.json for npx
+$packageJson = @"
+{
+    "name": "1c-mcp-bridge-launcher",
+    "version": "1.0.0",
+    "description": "Launch 1C MCP Bridge Python server from npx",
+    "bin": { "1c-bridge": "./launcher.cmd" },
+    "private": true
+}
+"@
+[System.IO.File]::WriteAllText($NpxPackageJson, $packageJson, [System.Text.UTF8Encoding]::new($false))
+
+# Write launcher.cmd with actual paths
+$launcherCmd = @"
+@echo off
+setlocal
+if not defined ONEC_DATABASES_FILE set ONEC_DATABASES_FILE=$DatabasesFile
+"$VenvPython" "$(Join-Path $AppDir 'mcp_server_1c.py')"
+"@
+[System.IO.File]::WriteAllText($NpxLauncherCmd, $launcherCmd, [System.Text.UTF8Encoding]::new($false))
+Log "Created npx launcher in $NpxDir"
+
 # List of supported MCP clients
 # Each client: id, name, dir (under %APPDATA%), config filename, optional subdir
 $MCPClients = @(
@@ -478,11 +505,11 @@ foreach ($client in $MCPClients) {
         $config[$mcpKey] = $tmp
     }
 
-    # Qwen Desktop only allows npx/uvx as commands — use our npm launcher
+    # Qwen Desktop only allows npx/uvx — use npm launcher in ProgramData (no spaces!)
     if ($client.id -eq 'qwen') {
         $config[$mcpKey]['1c-bridge'] = @{
             command = 'npx'
-            args    = @( $AppDir )
+            args    = @( $NpxDir )
             env     = @{
                 ONEC_DATABASES_FILE = $DatabasesFile
             }
