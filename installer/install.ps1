@@ -270,7 +270,7 @@ if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
             Log "Установлены права записи для группы Users."
         } catch {
             try {
-                & icacls $DatabasesFile /grant "Users:M" 2>&1 | Out-Null
+                & icacls $DatabasesFile /grant "*S-1-5-32-545:(M)" 2>&1 | Out-Null
                 Log "Права установлены через icacls."
             } catch {
                 Log "Не удалось установить права: $($_.Exception.Message)"
@@ -347,7 +347,7 @@ try {
     # Fallback: use icacls if .NET ACL fails (some Windows locales/versions)
     Log "SetAccessRule failed, trying icacls..."
     try {
-        & icacls $DatabasesFile /grant "Users:M" 2>&1 | Out-Null
+        & icacls $DatabasesFile /grant "*S-1-5-32-545:(M)" 2>&1 | Out-Null
         Log "Права установлены через icacls."
     } catch {
         Log "Не удалось установить права: $($_.Exception.Message)"

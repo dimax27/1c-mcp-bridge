@@ -768,8 +768,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ParamsPath: String;
-  ClaudeExe:  String;
-  ClaudeFound: Boolean;
+  AnyClientFound: Boolean;
   Msg: String;
 begin
   if CurStep = ssInstall then
@@ -791,27 +790,23 @@ begin
   if CurStep = ssPostInstall then
   begin
     // Проверяем, установлен ли хотя бы один MCP-клиент
-    ClaudeFound := False;
-    ClaudeExe := ExpandConstant('{localappdata}\AnthropicClaude\Claude.exe');
-    if FileExists(ClaudeExe) then ClaudeFound := True;
-    if not ClaudeFound then
-    begin
-      ClaudeExe := ExpandConstant('{localappdata}\Programs\claude-desktop\Claude.exe');
-      if FileExists(ClaudeExe) then ClaudeFound := True;
-    end;
-    if not ClaudeFound then
-    begin
-      if DirExists(ExpandConstant('{userappdata}\Claude')) then
-        ClaudeFound := True;
-    end;
+    AnyClientFound := False;
+    // Claude
+    if DirExists(ExpandConstant('{userappdata}\Claude')) then AnyClientFound := True;
+    // Qwen
+    if DirExists(ExpandConstant('{userappdata}\Qwen')) then AnyClientFound := True;
+    // Kimi
+    if DirExists(ExpandConstant('{userappdata}\kimi-desktop')) then AnyClientFound := True;
+    // Reasonix
+    if DirExists(ExpandConstant('{userappdata}\reasonix')) then AnyClientFound := True;
 
-    if ClaudeFound then
+    if AnyClientFound then
     begin
       Msg := 'Установка завершена.' + #13#10 + #13#10 +
              'Чтобы AI-ассистент увидел MCP-сервер 1C Bridge, его нужно полностью перезапустить:' + #13#10 +
-             '  1. Claude Desktop: правый клик по иконке в трее → Quit → запустить снова.' + #13#10 +
-             '  2. Qwen / Kimi Desktop: закрыть приложение и запустить заново.' + #13#10 +
-             '  3. Reasonix: перезапустить приложение.' + #13#10 + #13#10 +
+             '  • Claude Desktop: правый клик по иконке в трее → Quit → запустить снова.' + #13#10 +
+             '  • Qwen / Kimi Desktop: закрыть приложение и запустить заново.' + #13#10 +
+             '  • Reasonix: перезапустить приложение.' + #13#10 + #13#10 +
              'В новом чате появится индикатор инструментов с сервером 1c-bridge ' +
              'и пятью инструментами (execute_query, describe_object, list_metadata, get_object_by_ref, list_databases).';
       MsgBox(Msg, mbInformation, MB_OK);
