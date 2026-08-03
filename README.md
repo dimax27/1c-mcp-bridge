@@ -95,6 +95,21 @@
 
 AI-ассистент сам пройдёт по инструментам, составит и выполнит запрос, вернёт таблицу.
 
+## Подключение к Qwen Desktop
+
+Qwen Desktop разрешает только `npx`/`uvx` для stdio MCP-серверов.  
+Используйте **HTTP-сервер** (лежит в папке установки):
+
+1. Запустите сервер (окно PowerShell можно свернуть):
+```powershell
+& "C:\Program Files\1cMcpBridge\.venv\Scripts\python.exe" "C:\Program Files\1cMcpBridge\mcp_server_1c_http.py" --port 8000
+```
+2. В Qwen Desktop: Настройки → MCP → Добавить:
+   - Тип: **StreamableHTTP**
+   - URL: `http://127.0.0.1:8000/mcp`
+
+> Для автозапуска при входе в систему — добавьте эту команду в Планировщик заданий Windows.
+
 ## Несколько баз и заметки для AI (v0.3.0)
 
 Если у вас несколько баз — после установки запустите **1C Bridge Manager**
