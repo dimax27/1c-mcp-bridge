@@ -146,10 +146,8 @@ var
   LblFileBase:          TNewStaticText;
   LblServer, LblRef:    TNewStaticText;
   LblUser, LblPwd:      TNewStaticText;
-  LblOSAuthHint:        TNewStaticText;
 
   // Импорт существующего databases.json
-  SeparatorImport:       TNewStaticText;
   CheckImportDb:         TNewCheckBox;
   EditImportDbPath:      TNewEdit;
   BtnImportDbBrowse:     TNewButton;
@@ -307,6 +305,24 @@ procedure UpdateImportFields(Sender: TObject); forward;
   procedure TestConnectionClick(Sender: TObject); forward;
   procedure ImportDbBrowseClick(Sender: TObject); forward;
 
+// Список контролов, которые скрываются при импорте
+var
+  ManualControls: array of TWinControl;
+
+procedure AddManualControl(Ctrl: TWinControl);
+begin
+  SetArrayLength(ManualControls, GetArrayLength(ManualControls) + 1);
+  ManualControls[GetArrayLength(ManualControls) - 1] := Ctrl;
+end;
+
+procedure SetManualControlsVisible(Visible: Boolean);
+var
+  i: Integer;
+begin
+  for i := 0 to GetArrayLength(ManualControls) - 1 do
+    ManualControls[i].Visible := Visible;
+end;
+
 procedure CreateConnectionParamsPage;
 var
   Y, HalfW: Integer;
@@ -348,14 +364,44 @@ begin
   EditDbDescription.Width := HalfW;
   EditDbDescription.Left := HalfW + 12;
 
-  Y := Y + EditDbKey.Height + 12;
+  Y := Y + EditDbKey.Height + 10;
 
-  // --- Файловая база (показывается только при выборе файлового режима) ---
+  // --- Импорт существующего databases.json (компактно, сверху) ---
+  CheckImportDb := TNewCheckBox.Create(PageConnectionParams);
+  CheckImportDb.Parent := PageConnectionParams.Surface;
+  CheckImportDb.Caption := 'Импортировать существующий databases.json';
+  CheckImportDb.Top := Y;
+  CheckImportDb.Width := PageConnectionParams.SurfaceWidth - 100;
+  CheckImportDb.OnClick := @UpdateImportFields;
+  AddManualControl(CheckImportDb);
+
+  BtnImportDbBrowse := TNewButton.Create(PageConnectionParams);
+  BtnImportDbBrowse.Parent := PageConnectionParams.Surface;
+  BtnImportDbBrowse.Caption := 'Обзор...';
+  BtnImportDbBrowse.Top := Y - 2;
+  BtnImportDbBrowse.Left := CheckImportDb.Width + 4;
+  BtnImportDbBrowse.Width := 90;
+  BtnImportDbBrowse.Height := 22;
+  BtnImportDbBrowse.Enabled := False;
+  BtnImportDbBrowse.OnClick := @ImportDbBrowseClick;
+  AddManualControl(BtnImportDbBrowse);
+
+  EditImportDbPath := TNewEdit.Create(PageConnectionParams);
+  EditImportDbPath.Parent := PageConnectionParams.Surface;
+  EditImportDbPath.Top := 0;
+  EditImportDbPath.Width := 0;
+  EditImportDbPath.Text := '';
+  EditImportDbPath.Visible := False;
+
+  Y := Y + CheckImportDb.Height + 8;
+
+  // --- Файловая база ---
   LblFileBase := TNewStaticText.Create(PageConnectionParams);
   LblFileBase.Parent := PageConnectionParams.Surface;
   LblFileBase.Caption := 'Путь к каталогу файловой базы (.1CD):';
   LblFileBase.Top := Y;
   LblFileBase.Width := PageConnectionParams.SurfaceWidth;
+  AddManualControl(LblFileBase);
   Y := Y + LblFileBase.Height + 2;
 
   EditFileBasePath := TNewEdit.Create(PageConnectionParams);
@@ -363,7 +409,8 @@ begin
   EditFileBasePath.Top := Y;
   EditFileBasePath.Width := PageConnectionParams.SurfaceWidth;
   EditFileBasePath.Text := 'C:\1C\bases\MyBase';
-  Y := Y + EditFileBasePath.Height + 10;
+  AddManualControl(EditFileBasePath);
+  Y := Y + EditFileBasePath.Height + 6;
 
   // --- Сервер ---
   LblServer := TNewStaticText.Create(PageConnectionParams);
@@ -371,6 +418,7 @@ begin
   LblServer.Caption := 'Адрес сервера 1С (Srvr):';
   LblServer.Top := Y;
   LblServer.Width := PageConnectionParams.SurfaceWidth;
+  AddManualControl(LblServer);
   Y := Y + LblServer.Height + 2;
 
   EditServerName := TNewEdit.Create(PageConnectionParams);
@@ -378,7 +426,8 @@ begin
   EditServerName.Top := Y;
   EditServerName.Width := PageConnectionParams.SurfaceWidth;
   EditServerName.Text := '127.0.0.1';
-  Y := Y + EditServerName.Height + 8;
+  AddManualControl(EditServerName);
+  Y := Y + EditServerName.Height + 6;
 
   // --- Имя ИБ ---
   LblRef := TNewStaticText.Create(PageConnectionParams);
@@ -386,13 +435,15 @@ begin
   LblRef.Caption := 'Имя информационной базы в кластере (Ref):';
   LblRef.Top := Y;
   LblRef.Width := PageConnectionParams.SurfaceWidth;
+  AddManualControl(LblRef);
   Y := Y + LblRef.Height + 2;
 
   EditRefName := TNewEdit.Create(PageConnectionParams);
   EditRefName.Parent := PageConnectionParams.Surface;
   EditRefName.Top := Y;
   EditRefName.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + EditRefName.Height + 12;
+  AddManualControl(EditRefName);
+  Y := Y + EditRefName.Height + 8;
 
   // --- OS-аутентификация ---
   CheckOSAuth := TNewCheckBox.Create(PageConnectionParams);
@@ -402,15 +453,8 @@ begin
   CheckOSAuth.Width := PageConnectionParams.SurfaceWidth;
   CheckOSAuth.Checked := True;
   CheckOSAuth.OnClick := @UpdateAuthFields;
-  Y := Y + CheckOSAuth.Height + 8;
-
-  // Hint вместо отдельной строки убираем — он избыточный.
-  LblOSAuthHint := TNewStaticText.Create(PageConnectionParams);
-  LblOSAuthHint.Parent := PageConnectionParams.Surface;
-  LblOSAuthHint.Caption := '';
-  LblOSAuthHint.Top := 0;
-  LblOSAuthHint.Width := 0;
-  LblOSAuthHint.Visible := False;
+  AddManualControl(CheckOSAuth);
+  Y := Y + CheckOSAuth.Height + 6;
 
   // --- Логин и пароль в одну строку ---
   LblUser := TNewStaticText.Create(PageConnectionParams);
@@ -419,6 +463,7 @@ begin
   LblUser.Top := Y;
   LblUser.Width := HalfW;
   LblUser.Left := 0;
+  AddManualControl(LblUser);
 
   LblPwd := TNewStaticText.Create(PageConnectionParams);
   LblPwd.Parent := PageConnectionParams.Surface;
@@ -426,6 +471,7 @@ begin
   LblPwd.Top := Y;
   LblPwd.Width := HalfW;
   LblPwd.Left := HalfW + 12;
+  AddManualControl(LblPwd);
 
   Y := Y + LblUser.Height + 2;
 
@@ -434,6 +480,7 @@ begin
   EditUser.Top := Y;
   EditUser.Width := HalfW;
   EditUser.Left := 0;
+  AddManualControl(EditUser);
 
   EditPassword := TNewEdit.Create(PageConnectionParams);
   EditPassword.Parent := PageConnectionParams.Surface;
@@ -441,40 +488,7 @@ begin
   EditPassword.Width := HalfW;
   EditPassword.Left := HalfW + 12;
   EditPassword.PasswordChar := '*';
-
-  // --- Импорт существующего databases.json ---
-  Y := Y + EditUser.Height + 12;
-  SeparatorImport := TNewStaticText.Create(PageConnectionParams);
-  SeparatorImport.Parent := PageConnectionParams.Surface;
-  SeparatorImport.Caption := '——————————————————————';
-  SeparatorImport.Top := Y;
-  SeparatorImport.Width := PageConnectionParams.SurfaceWidth;
-  Y := Y + SeparatorImport.Height + 4;
-
-  CheckImportDb := TNewCheckBox.Create(PageConnectionParams);
-  CheckImportDb.Parent := PageConnectionParams.Surface;
-  CheckImportDb.Caption := 'Импортировать существующий databases.json (пропустить ручной ввод)';
-  CheckImportDb.Top := Y;
-  CheckImportDb.Width := PageConnectionParams.SurfaceWidth;
-  CheckImportDb.OnClick := @UpdateImportFields;
-  Y := Y + CheckImportDb.Height + 6;
-
-  EditImportDbPath := TNewEdit.Create(PageConnectionParams);
-  EditImportDbPath.Parent := PageConnectionParams.Surface;
-  EditImportDbPath.Top := Y;
-  EditImportDbPath.Width := PageConnectionParams.SurfaceWidth - 100;
-  EditImportDbPath.Text := '';
-  EditImportDbPath.Enabled := False;
-
-  BtnImportDbBrowse := TNewButton.Create(PageConnectionParams);
-  BtnImportDbBrowse.Parent := PageConnectionParams.Surface;
-  BtnImportDbBrowse.Caption := 'Обзор...';
-  BtnImportDbBrowse.Top := Y;
-  BtnImportDbBrowse.Left := EditImportDbPath.Width + 8;
-  BtnImportDbBrowse.Width := 90;
-  BtnImportDbBrowse.Height := 22;
-  BtnImportDbBrowse.Enabled := False;
-  BtnImportDbBrowse.OnClick := @ImportDbBrowseClick;
+  AddManualControl(EditPassword);
 end;
 
 procedure UpdateAuthFields(Sender: TObject);
@@ -492,6 +506,9 @@ procedure UpdateConnectionFieldsVisibility;
 var
   IsServer: Boolean;
 begin
+  // При импорте не трогаем видимость — все скрыто
+  if CheckImportDb.Checked then Exit;
+
   IsServer := (PageConnectionMode.SelectedValueIndex = 1);
   LblFileBase.Visible      := not IsServer;
   EditFileBasePath.Visible := not IsServer;
@@ -504,8 +521,21 @@ var
   Enable: Boolean;
 begin
   Enable := CheckImportDb.Checked;
-  EditImportDbPath.Enabled := Enable;
   BtnImportDbBrowse.Enabled := Enable;
+  SetManualControlsVisible(not Enable);
+  // При импорте скрываем вообще всё ручное
+  if Enable then
+  begin
+    LblDbKey.Visible := True;
+    EditDbKey.Visible := True;
+    LblDbDescription.Visible := True;
+    EditDbDescription.Visible := True;
+  end
+  else
+  begin
+    // Восстанавливаем видимость в зависимости от типа базы
+    UpdateConnectionFieldsVisibility;
+  end;
 end;
 
 procedure ImportDbBrowseClick(Sender: TObject);
