@@ -78,7 +78,7 @@ foreach ($client in $MCPClients) {
 
     try {
         $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
-        $config   = $jsonText | ConvertFrom-Json -AsHashtable
+        $config   = $jsonText | ConvertFrom-Json
         $config   = ConvertTo-HashtableDeep $config
 
         $mcpKey = if ($client.mcp_key) { $client.mcp_key } else { 'mcpServers' }

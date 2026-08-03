@@ -295,7 +295,8 @@ if (-not $DbKey)  { $DbKey  = 'main' }
 if (Test-Path $DatabasesFile) {
     Log "Найден существующий $DatabasesFile — обновляю запись '$DbKey'."
     try {
-        $dbConfig = Get-Content $DatabasesFile -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
+        $dbConfig = Get-Content $DatabasesFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $dbConfig = ConvertTo-HashtableDeep $dbConfig
         if (-not $dbConfig.databases) { $dbConfig.databases = @{} }
     } catch {
         Log "Не удалось прочитать databases.json: $($_.Exception.Message). Создаю заново."
@@ -421,20 +422,6 @@ foreach ($client in $MCPClients) {
     } elseif (Test-Path $ConfigDir) {
         $clientInstalled = $true
         Log "$($client.name): found dir $ConfigDir (no config yet)"
-    } else {
-        # Check for exe in LocalAppData
-        $localExeDirs = @(
-            Join-Path $env:LOCALAPPDATA "Programs\$($client.id)-desktop",
-            Join-Path $env:LOCALAPPDATA "Programs\$($client.id)",
-            Join-Path $env:LOCALAPPDATA $client.dir
-        )
-        foreach ($d in $localExeDirs) {
-            if (Test-Path $d) {
-                $clientInstalled = $true
-                Log "$($client.name): found $d"
-                break
-            }
-        }
     }
 
     if (-not $clientInstalled) {
@@ -454,7 +441,7 @@ foreach ($client in $MCPClients) {
         Log "$($client.name): updating existing config."
         try {
             $jsonText = Get-Content -Path $ConfigPath -Raw -Encoding UTF8
-            $config   = $jsonText | ConvertFrom-Json -AsHashtable
+            $config   = $jsonText | ConvertFrom-Json
             $config   = ConvertTo-HashtableDeep $config
         } catch {
             Log "$($client.name): parse error - $($_.Exception.Message). Making backup."
