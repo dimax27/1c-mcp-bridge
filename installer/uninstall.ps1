@@ -97,4 +97,24 @@ foreach ($client in $MCPClients) {
     }
 }
 
+# --- ChatGPT Desktop (OpenAI Codex): config.toml лежит в профиле пользователя ---
+$CodexPython = 'C:\Program Files\1cMcpBridge\.venv\Scripts\python.exe'
+$CodexScript = 'C:\Program Files\1cMcpBridge\clients_config.py'
+$UserProfiles = Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -notin @('Public','Default','Default User','All Users') }
+foreach ($u in $UserProfiles) {
+    $CodexCfg = Join-Path $u.FullName '.codex\config.toml'
+    if (-not (Test-Path $CodexCfg)) { continue }
+    if (Test-Path $CodexPython -and (Test-Path $CodexScript)) {
+        try {
+            & $CodexPython $CodexScript remove-codex --path $CodexCfg --server '1c-bridge' | Out-Null
+            Write-Host "Removed 1c-bridge from ChatGPT Desktop config: $CodexCfg"
+        } catch {
+            Write-Host "Failed to update ChatGPT Desktop config: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Host "WARNING: секция 1c-bridge осталась в $CodexCfg — удалите её вручную (мост уже удалён)."
+    }
+}
+
 exit 0

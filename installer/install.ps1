@@ -398,10 +398,15 @@ Log "HTTP token saved to $TokenFile"
 
 $VbsLauncher = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
 $vbsContent = @"
-CreateObject("Wscript.Shell").Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000", 0, False
+Set shell = CreateObject("Wscript.Shell")
+shell.Environment("PROCESS")("ONEC_DATABASES_FILE") = "$DatabasesFile"
+shell.Environment("PROCESS")("ONEC_HTTP_TOKEN") = "$HttpToken"
+shell.Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000", 0, False
 "@
 [System.IO.File]::WriteAllText($VbsLauncher, $vbsContent, [System.Text.ASCIIEncoding]::new())
 Log "Created silent VBS launcher in $AppDir"
+# Токен — секрет: ограничиваем ACL, как у databases.json
+Set-DatabaseFileAcl $TokenFile
 Log ""
 Log "=============================================="
 Log "  QWEN DESKTOP SETUP"
@@ -416,7 +421,8 @@ $MCPClients = @(
     @{ id = 'claude';   name = 'Claude Desktop';    dir = 'Claude';        config = 'claude_desktop_config.json' },
     @{ id = 'qwen';     name = 'Qwen Desktop';      dir = 'Qwen';          config = 'settings.json'; mcp_key = 'mcp_config' },
     @{ id = 'kimi';     name = 'Kimi Desktop';      dir = 'kimi-desktop';  config = 'mcp_config.json' },
-    @{ id = 'reasonix'; name = 'Reasonix';          dir = 'reasonix';      config = '.mcp.json'; subdir = 'global-workspace' }
+    @{ id = 'reasonix'; name = 'Reasonix';          dir = 'reasonix';      config = '.mcp.json'; subdir = 'global-workspace' },
+    @{ id = 'chatgpt';  name = 'ChatGPT Desktop';   config = 'config.toml'; toml = $true; config_path_override = (Join-Path $env:USERPROFILE '.codex\config.toml') }
 )
 
 $ServerEntry = @{
@@ -461,6 +467,9 @@ foreach ($client in $MCPClients) {
     if ($envPath) {
         $ConfigPath = $envPath
         $ConfigDir = Split-Path $ConfigPath -Parent
+    } elseif ($client.config_path_override) {
+        $ConfigPath = $client.config_path_override
+        $ConfigDir = Split-Path $ConfigPath -Parent
     } else {
         if ($client.subdir) {
             $ConfigDir  = Join-Path $UserAppData $client.dir | Join-Path -ChildPath $client.subdir
@@ -490,6 +499,20 @@ foreach ($client in $MCPClients) {
     if (-not (Test-Path $ConfigDir)) {
         New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
         Log "$($client.name): created dir $ConfigDir"
+    }
+
+    # ChatGPT Desktop (MSIX-приложение OpenAI Codex) запускает stdio-MCP-серверы
+    # в Windows-песочнице, где COM-коннектор 1С и сеть недоступны.
+    # Поэтому настраиваем streamable-http сервер моста на localhost (вне песочницы).
+    if ($client.toml) {
+        $HttpUrl = "http://127.0.0.1:8000/mcp/$HttpToken"
+        & $VenvPython (Join-Path $AppDir 'clients_config.py') patch-codex --path $ConfigPath --server '1c-bridge' --url $HttpUrl
+        if ($LASTEXITCODE -ne 0) {
+            throw "clients_config.py patch-codex завершился с кодом $LASTEXITCODE"
+        }
+        Log "$($client.name): config written - $ConfigPath (url $HttpUrl)"
+        $ConfiguredClients += $client.name
+        continue
     }
 
     # Read or create config

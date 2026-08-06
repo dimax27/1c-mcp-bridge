@@ -1,15 +1,17 @@
 """
-1C MCP Bridge — HTTP server for Qwen Desktop.
+1C MCP Bridge — HTTP server for MCP-клиентов с песочницей (Qwen, ChatGPT/Codex).
 
 Security: binds to 127.0.0.1. Uses a random path prefix if
 ONEC_HTTP_TOKEN is set (e.g. /mcp/<token> instead of /mcp).
 """
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(__file__))
-from mcp_server_1c import mcp, log, DB_CONFIG
+from mcp_server_1c import DB_CONFIG, log, mcp
 
 if __name__ == "__main__":
-    import argparse, secrets
+    import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8000)
@@ -26,4 +28,9 @@ if __name__ == "__main__":
 
     log.info("Starting 1C MCP Bridge HTTP on %s:%d%s", args.host, args.port, path_prefix)
     log.info("Databases: %s", list(DB_CONFIG["databases"].keys()))
-    mcp.run(transport="streamable-http", host=args.host, port=args.port)
+    mcp.run(
+        transport="streamable-http",
+        host=args.host,
+        port=args.port,
+        streamable_http_path=path_prefix,
+    )
