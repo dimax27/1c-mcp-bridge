@@ -64,6 +64,7 @@ log = logging.getLogger("mcp-1c")
 # Загрузка списка баз
 # ---------------------------------------------------------------------------
 
+from credentials import build_conn_str, migrate_to_encrypted
 from config import (
     positive_env_int,
     HARD_LIMIT, DEFAULT_LIMIT,
@@ -118,6 +119,7 @@ def load_databases() -> dict:
         raise RuntimeError(f"{path}: пустой или отсутствует ключ 'databases'")
 
     # Валидация каждой базы
+    migrated = False
     for key, cfg in databases.items():
         if not isinstance(cfg, dict):
             raise RuntimeError(f"databases.{key}: должна быть объектом")
@@ -131,6 +133,11 @@ def load_databases() -> dict:
         cfg.setdefault("notes", "")
         cfg.setdefault("enabled", True)
 
+        # Auto-migrate plaintext passwords to DPAPI (non-destructive)
+        if migrate_to_encrypted(cfg):
+            log.info("Мигрирован пароль для '%s' в DPAPI", key)
+            migrated = True
+
     # Фильтруем отключённые — AI-клиенты их вообще не должны видеть
     enabled_databases = {k: v for k, v in databases.items() if v.get("enabled", True)}
     if not enabled_databases:
@@ -141,8 +148,16 @@ def load_databases() -> dict:
 
     default_db = data.get("default_database") or next(iter(enabled_databases))
     if default_db not in enabled_databases:
-        # default отключена — берём первую включённую
         default_db = next(iter(enabled_databases))
+
+    # Save back if passwords were migrated to DPAPI
+    if migrated:
+        try:
+            data["databases"] = databases
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            log.info("databases.json обновлён с DPAPI-миграцией")
+        except Exception as exc:
+            log.warning("Не удалось сохранить миграцию: %s", exc)
 
     return {
         "default_database": default_db,
@@ -225,7 +240,7 @@ def get_connection(db_key: str) -> Any:
 
     cfg = DB_CONFIG["databases"][db_key]
     progid = cfg["progid"]
-    conn_str = cfg["connection_string"]
+    conn_str = build_conn_str(cfg)
 
     log.info("Подключаюсь к '%s' через %s", db_key, progid)
     # EnsureDispatch кеширует type library (быстрее), но может не работать
