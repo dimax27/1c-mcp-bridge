@@ -39,6 +39,13 @@ import pythoncom
 import pywintypes
 import win32com.client
 from mcp.server import MCPServer
+from mcp_types import ToolAnnotations
+
+from version import VERSION
+
+# Все инструменты моста только читают данные из 1С — клиент может
+# использовать подсказку для классификации действия и решений о подтверждениях.
+READ_ONLY_1C_TOOL = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 
 # На Windows stdout/stderr по умолчанию в cp1251 — MCP-клиенты пишут лог в
 # UTF-8. Принудительно перекодируем.
@@ -485,7 +492,7 @@ def _with_db_info(doc: str) -> str:
     return doc.rstrip() + _DB_BLOCK
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_1C_TOOL)
 def execute_query(
     text: str,
     parameters: dict | None = None,
@@ -637,7 +644,7 @@ def _cached_metadata_put(db_key: str, path: str, result: dict) -> None:
             _metadata_cache.clear()
         _metadata_cache[(db_key, path)] = deepcopy(result)
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_1C_TOOL)
 def describe_object(path: str, database: str | None = None) -> dict:
     """Возвращает структуру объекта метаданных конфигурации.
 
@@ -726,7 +733,7 @@ def describe_object(path: str, database: str | None = None) -> dict:
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_1C_TOOL)
 def list_metadata(
     metadata_type: str,
     name_filter: str | None = None,
@@ -770,7 +777,7 @@ def list_metadata(
         return {"error": f"Ошибка 1С: {parse_com_error(e)}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_1C_TOOL)
 def get_object_by_ref(
     uuid: str,
     type_path: str,
@@ -820,7 +827,7 @@ def get_object_by_ref(
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_1C_TOOL)
 def list_databases() -> dict:
     """Возвращает список всех настроенных информационных баз с описаниями и заметками.
 
@@ -869,7 +876,7 @@ _patch_tool_descriptions()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Стартую 1C MCP Bridge v0.4.3")
+    log.info("Стартую 1C MCP Bridge v%s", VERSION)
     log.info("Файл со списком баз: %s", find_databases_file())
     log.info("Базы: %s", list_database_keys())
     log.info("По умолчанию: %s", DB_CONFIG["default_database"])

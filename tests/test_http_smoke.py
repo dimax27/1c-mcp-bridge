@@ -1,7 +1,9 @@
 """HTTP smoke test: real streamable-http server + MCP client through the token path.
 
 Поднимает mcp_server_1c_http.py на свободном порту с временным databases.json
-и проверяет полный цикл MCP-транспорта: initialize → tools/list → call_tool.
+и проверяет полный цикл MCP-транспорта: initialize → tools/list → call_tool,
+а также систему журналирования (--log-file), поведение при занятом порте и
+read-only аннотации инструментов.
 
 Не требует 1С: tools/list и list_databases работают без COM-подключения.
 
@@ -15,7 +17,6 @@ import os
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -37,6 +38,8 @@ EXPECTED_TOOLS = [
 ]
 
 _TOKEN = "SmokeToken123"
+_LOG_LINE_START = "Starting 1C MCP Bridge HTTP"
+_LOG_LINE_PORT_BUSY = "HTTP-сервер завершился при запуске/работе, код="
 
 
 def _free_port() -> int:
@@ -59,9 +62,13 @@ def _wait_port(port: int, timeout: float = 20.0) -> bool:
 
 
 @pytest.fixture
-def http_server():
-    with tempfile.TemporaryDirectory(prefix="1c-bridge-smoke-") as td:
-        db = Path(td) / "databases.json"
+def start_server(tmp_path):
+    """Фабрика запуска сервера: возвращает контекст с url, путём лога и proc."""
+    procs: list[subprocess.Popen] = []
+    blockers: list[socket.socket] = []
+
+    def _start(*, log_file: Path | None = None, occupy_port: bool = False) -> dict:
+        db = tmp_path / f"databases-{len(procs)}.json"
         db.write_text(
             json.dumps(
                 {
@@ -82,34 +89,56 @@ def http_server():
         )
 
         port = _free_port()
+        blocker = None
+        if occupy_port:
+            blocker = socket.socket()
+            blocker.bind(("127.0.0.1", port))
+            blocker.listen(1)
+            blockers.append(blocker)
+
         env = dict(os.environ)
         env["ONEC_DATABASES_FILE"] = str(db)
         env["ONEC_HTTP_TOKEN"] = _TOKEN
 
+        cmd = [sys.executable, str(SERVER), "--port", str(port)]
+        if log_file is not None:
+            cmd += ["--log-file", str(log_file)]
+
         proc = subprocess.Popen(
-            [sys.executable, str(SERVER), "--port", str(port)],
+            cmd,
             cwd=str(SRC),
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        try:
+        procs.append(proc)
+        if not occupy_port:
             assert _wait_port(port), "HTTP-сервер не поднялся за отведённое время"
-            token_url = f"http://127.0.0.1:{port}/mcp/{_TOKEN}"
-            plain_url = f"http://127.0.0.1:{port}/mcp"
-            yield token_url, plain_url
-        finally:
-            proc.terminate()
+        return {
+            "proc": proc,
+            "port": port,
+            "token_url": f"http://127.0.0.1:{port}/mcp/{_TOKEN}",
+            "plain_url": f"http://127.0.0.1:{port}/mcp",
+            "log_file": log_file,
+        }
+
+    yield _start
+
+    for p in procs:
+        if p.poll() is None:
+            p.terminate()
             try:
-                proc.wait(timeout=5)
+                p.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                p.kill()
+    for b in blockers:
+        b.close()
 
 
-def _run_probe(token_url: str):
-    """С retry: первый connect может прийти до полного старта uvicorn."""
+def _probe_tools(token_url: str) -> tuple:
+    """list_tools + list_databases с retry на этап старта сервера."""
 
-    async def probe() -> tuple:
+    async def run() -> tuple:
         from mcp import Client
 
         last: Exception | None = None
@@ -118,36 +147,49 @@ def _run_probe(token_url: str):
                 async with Client(token_url) as client:
                     result = await client.list_tools()
                     names = sorted(t.name for t in result.tools)
+                    annotations = {
+                        t.name: t.annotations for t in result.tools
+                    }
                     call = await client.call_tool("list_databases", {})
-                    return names, call
+                    return names, annotations, call
             except Exception as exc:  # noqa: BLE001 — retry на этапе старта
                 last = exc
                 await asyncio.sleep(1)
         raise AssertionError(f"не удалось подключиться к серверу: {last}")
 
-    return asyncio.run(probe())
+    return asyncio.run(run())
 
 
-def test_http_smoke_token_path(http_server):
-    token_url, _plain = http_server
-    names, call = _run_probe(token_url)
-
-    assert names == EXPECTED_TOOLS, f"tools/list вернул: {names}"
-
-    assert not getattr(call, "is_error", False), "list_databases вернул ошибку"
-    text = "".join(
+def _call_tool_text(call) -> str:
+    return "".join(
         getattr(item, "text", "") or ""
         for item in getattr(call, "content", []) or []
     )
-    payload = json.loads(text)
+
+
+def test_http_smoke_token_path(start_server):
+    ctx = start_server()
+    names, annotations, call = _probe_tools(ctx["token_url"])
+
+    assert names == EXPECTED_TOOLS, f"tools/list вернул: {names}"
+
+    # инструменты помечены read-only — клиент видит подсказку
+    for name in EXPECTED_TOOLS:
+        ann = annotations.get(name)
+        assert ann is not None and getattr(ann, "read_only_hint", False) is True, (
+            f"инструмент {name} не помечен read_only_hint=True"
+        )
+
+    assert not getattr(call, "is_error", False), "list_databases вернул ошибку"
+    payload = json.loads(_call_tool_text(call))
     assert "smoke" in payload.get("databases", {}), f"нет базы smoke: {payload}"
 
 
-def test_http_smoke_plain_path_rejected(http_server):
+def test_http_smoke_plain_path_rejected(start_server):
     """Без токена маршрут /mcp не должен существовать (защита path-токеном)."""
-    _token_url, plain_url = http_server
+    ctx = start_server()
     req = urllib.request.Request(
-        plain_url,
+        ctx["plain_url"],
         data=json.dumps(
             {
                 "jsonrpc": "2.0",
@@ -166,3 +208,33 @@ def test_http_smoke_plain_path_rejected(http_server):
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(req, timeout=10)
     assert excinfo.value.code == 404
+
+
+def test_http_log_created_and_token_never_in_log(start_server, tmp_path):
+    log_file = tmp_path / "http-server.log"
+    ctx = start_server(log_file=log_file)
+
+    _probe_tools(ctx["token_url"])
+
+    assert log_file.exists(), "http-server.log не создан"
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    assert _LOG_LINE_START in text, f"в логе нет строки запуска: {text[:300]}"
+    assert _TOKEN not in text, "path-токен попал в журнал!"
+
+
+def test_occupied_port_is_logged(start_server, tmp_path):
+    log_file = tmp_path / "http-server.log"
+    ctx = start_server(log_file=log_file, occupy_port=True)
+
+    try:
+        code = ctx["proc"].wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        ctx["proc"].kill()
+        pytest.fail("сервер не завершился при занятом порте")
+
+    assert code != 0, f"ожидался ненулевой код возврата, получен {code}"
+    assert log_file.exists(), "http-server.log не создан"
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    assert _LOG_LINE_PORT_BUSY in text, (
+        f"в логе нет записи об ошибке старта: {text[-500:]}"
+    )

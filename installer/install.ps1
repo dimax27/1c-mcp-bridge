@@ -398,10 +398,20 @@ Log "HTTP token saved to $TokenFile"
 
 $VbsLauncher = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
 $HttpLogFile = Join-Path $NpxDir 'http-server.log'
+# Журнал создаём заранее и защищаем ACL, чтобы FileHandler не падал у обычного пользователя
+if (-not (Test-Path $HttpLogFile)) {
+    [System.IO.File]::WriteAllText($HttpLogFile, '', [System.Text.UTF8Encoding]::new($false))
+}
+Set-DatabaseFileAcl $HttpLogFile
 $vbsContent = @"
 Set shell = CreateObject("Wscript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+tokenFile = "$TokenFile"
+Set tokenStream = fso.OpenTextFile(tokenFile, 1)
+token = Trim(tokenStream.ReadAll)
+tokenStream.Close
 shell.Environment("PROCESS")("ONEC_DATABASES_FILE") = "$DatabasesFile"
-shell.Environment("PROCESS")("ONEC_HTTP_TOKEN") = "$HttpToken"
+shell.Environment("PROCESS")("ONEC_HTTP_TOKEN") = token
 shell.Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000 --log-file ""$HttpLogFile""", 0, False
 "@
 [System.IO.File]::WriteAllText($VbsLauncher, $vbsContent, [System.Text.ASCIIEncoding]::new())
@@ -412,8 +422,8 @@ Log ""
 Log "=============================================="
 Log "  QWEN DESKTOP SETUP"
 Log "=============================================="
-Log "  Server URL: http://127.0.0.1:8000/mcp/$HttpToken"
-Log "  (Token also saved to $TokenFile)"
+Log "  Server URL: http://127.0.0.1:8000/mcp/<token>"
+Log "  (Token saved to $TokenFile; VBS читает токен из этого файла при запуске)"
 Log "=============================================="
 
 # List of supported MCP clients

@@ -148,10 +148,9 @@ def detect_installed_clients() -> list[dict]:
         # Allow per-client override of the config path
         env_var = f"ONEC_{c['id'].upper()}_CONFIG"
         env_path = os.environ.get(env_var, "").strip()
-        if env_path:
-            if Path(env_path).exists():
-                installed.append(c)
-                continue
+        if env_path and Path(env_path).exists():
+            installed.append(c)
+            continue
 
         # Check if the config file already exists
         config_path = client_config_path(c)

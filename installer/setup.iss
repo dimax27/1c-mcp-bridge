@@ -73,6 +73,7 @@ Source: "..\src\credentials.py";         DestDir: "{app}";              Flags: i
 Source: "..\src\mcp_server_1c.py";       DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\mcp_server_1c_http.py";  DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\query_timeout.py";       DestDir: "{app}";              Flags: ignoreversion
+Source: "..\src\version.py";             DestDir: "{app}";              Flags: ignoreversion
 Source: "..\requirements.txt";           DestDir: "{app}";              Flags: ignoreversion
 Source: "..\LICENSE";                    DestDir: "{app}";              Flags: ignoreversion
 Source: "..\README.md";                  DestDir: "{app}";              Flags: ignoreversion
