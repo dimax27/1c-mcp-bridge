@@ -193,54 +193,45 @@ if ($LASTEXITCODE -ne 0) { throw "pip install вернул $LASTEXITCODE" }
 # 5. Регистрация COM-коннектора
 # -----------------------------------------------------------------------------
 Stage "Регистрация COM-коннектора 1С (это может занять 1-2 минуты)"
-if ($DllPath -and (Test-Path $DllPath)) {
+
+# Try using connector directly first — often already registered
+$needRegistration = $true
+try {
+    $testConnector = New-Object -ComObject $ProgID
+    Log "COM-коннектор уже зарегистрирован — пропускаю regsvr32."
+    $needRegistration = $false
+} catch {
+    Log "COM-коннектор не зарегистрирован."
+}
+
+if ($needRegistration -and $DllPath -and (Test-Path $DllPath)) {
     Log "Регистрирую $DllPath..."
     $proc = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', "`"$DllPath`"") -Wait -PassThru
-    if ($proc.ExitCode -ne 0) {
-        Log "regsvr32 вернул код $($proc.ExitCode) — возможно, коннектор уже зарегистрирован."
-    } else {
-        Log "COM-коннектор зарегистрирован."
-    }
+    if ($proc.ExitCode -ne 0) { Log "regsvr32 exit code: $($proc.ExitCode)" }
+    else { Log "COM-коннектор зарегистрирован." }
 
-    # Массовая регистрация остальных DLL из bin'а 1С.
-    # При первом подключении через V83.COMConnector платформа подгружает
-    # type-libraries из соседних DLL (frnt*, bsl*, wbas*, …). Если они не
-    # зарегистрированы — Connect() падает с TYPE_E_LIBNOTREGISTERED (0x8002801D).
-    # Регистрируем все доступные DLL — лишнего не будет, regsvr32 для не-COM
-    # библиотек просто молча пропустит.
+    # Register essential type-library DLLs only
     $binDir = Split-Path $DllPath -Parent
-    if (Test-Path $binDir) {
-        Log "Регистрирую остальные DLL из $binDir (для type-libraries)..."
-        $dlls = Get-ChildItem $binDir -Filter '*.dll' -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -ine 'comcntr.dll' }
-        $total = $dlls.Count
-        Log "Найдено DLL для регистрации: $total"
-        Write-Host ""
-        Write-Host "=== Регистрирую $total DLL параллельно (потоков: 8) ===" -ForegroundColor Cyan
-
-        # Параллельно через стандартный ThreadJob/Job pool — но в PS5 через runspace pool
-        # Простой и надёжный способ: батчами по 8, не блокируя UI
-        $batchSize = 8
-        $processed = 0
-        for ($i = 0; $i -lt $total; $i += $batchSize) {
-            $batch = $dlls[$i..([Math]::Min($i + $batchSize - 1, $total - 1))]
-            $procs = @()
-            foreach ($dll in $batch) {
-                $procs += Start-Process -FilePath 'regsvr32.exe' `
-                                         -ArgumentList @('/s', "`"$($dll.FullName)`"") `
-                                         -PassThru -WindowStyle Hidden
-            }
-            $procs | Wait-Process -ErrorAction SilentlyContinue
-            $processed += $batch.Count
-            $percent = [Math]::Round(100 * $processed / $total)
-            Write-Host ("  [{0,3}%] {1} / {2}" -f $percent, $processed, $total)
-        }
-        Write-Host ""
-        Log "Обработано DLL: $processed (часть из них не COM — это нормально)."
+    $essential = @('comcntr.dll', 'comcntr64.dll', 'V8Reader.dll', 'V8Writer.dll',
+                   'core82.dll', 'core83.dll', 'core85.dll', 'backend.dll')
+    $toRegister = @()
+    foreach ($dll in $essential) {
+        $p = Join-Path $binDir $dll
+        if (Test-Path $p) { $toRegister += $p }
     }
-} else {
-    Log "Путь к comcntr.dll не задан или не существует ($DllPath). Пропускаю regsvr32."
-    Log "Если потом возникнет ошибка 'Class not registered' — выполни вручную: regsvr32 <путь к comcntr.dll>"
+    if ($toRegister.Count -eq 0) {
+        Log "Essential DLLs not found, falling back to bulk..."
+        $toRegister = @(Get-ChildItem $binDir -Filter '*.dll' | % { $_.FullName })
+    }
+    Log "Registering $($toRegister.Count) DLLs for type-libraries..."
+    $ok, $fail = 0, 0
+    foreach ($dll in $toRegister) {
+        $p = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', "`"$dll`"") -Wait -PassThru
+        if ($p.ExitCode -eq 0) { $ok++ } else { $fail++ }
+    }
+    Log "DLLs: $ok OK, $fail failed (non-COM DLLs fail normally)"
+} elseif (-not $DllPath) {
+    Log "comcntr.dll path not set — skipping registration."
 }
 
 # -----------------------------------------------------------------------------
