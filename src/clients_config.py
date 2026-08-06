@@ -146,7 +146,11 @@ def detect_installed_clients() -> list[dict]:
 
 
 def read_client_config(client: dict) -> dict:
-    """Read and parse a client's MCP config file. Returns empty dict on failure."""
+    """Read and parse a client's MCP config file.
+
+    Returns empty dict if file doesn't exist.
+    Raises ValueError if file exists but can't be parsed (corrupt JSON).
+    """
     path = client_config_path(client)
     if not path.exists():
         return {}
@@ -154,19 +158,37 @@ def read_client_config(client: dict) -> dict:
 
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    except (json.JSONDecodeError, OSError) as e:
+        raise ValueError(f"Failed to parse {path}: {e}") from e
 
 
 def write_client_config(client: dict, config: dict) -> None:
-    """Write a client's MCP config file (UTF-8 without BOM)."""
+    """Write a client's MCP config file atomically (UTF-8 without BOM).
+
+    Writes to a temp file first, then replaces the original.
+    Keeps a .bak backup of the previous version.
+    """
     import json
 
     path = client_config_path(client)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # UTF-8 without BOM — same as Claude expects
+
     raw = json.dumps(config, ensure_ascii=False, indent=2)
-    path.write_text(raw, encoding="utf-8")
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+
+    # Write to temp file
+    tmp_path.write_text(raw, encoding="utf-8")
+
+    # Backup existing config if present
+    if path.exists():
+        bak_path = path.with_suffix(path.suffix + ".bak")
+        try:
+            path.replace(bak_path)
+        except OSError:
+            pass
+
+    # Atomic rename
+    tmp_path.replace(path)
 
 
 def _mcp_key(client: dict) -> str:

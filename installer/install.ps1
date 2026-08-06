@@ -263,14 +263,15 @@ if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
         # Права на запись
         try {
             $acl = Get-Acl $DatabasesFile
+            $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
             $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                "Users", "Modify", "Allow")
+                $currentUser, "Modify", "Allow")
             $acl.SetAccessRule($rule)
             Set-Acl $DatabasesFile $acl
-            Log "Установлены права записи для группы Users."
+            Log "Установлены права записи для $currentUser."
         } catch {
             try {
-                & icacls $DatabasesFile /grant "*S-1-5-32-545:(M)" 2>&1 | Out-Null
+                & icacls $DatabasesFile /grant "${currentUser}:(M)" 2>&1 | Out-Null
                 Log "Права установлены через icacls."
             } catch {
                 Log "Не удалось установить права: $($_.Exception.Message)"
@@ -335,19 +336,20 @@ $dbJson = $dbConfig | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($DatabasesFile, $dbJson, [System.Text.UTF8Encoding]::new($false))
 Log "Записан $DatabasesFile (база '$DbKey')"
 
-# Даём права на запись всем пользователям машины — иначе Manager без админа не сможет править
+# Даём права на запись текущему пользователю
 try {
     $acl = Get-Acl $DatabasesFile
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "Users", "Modify", "Allow")
+        $currentUser, "Modify", "Allow")
     $acl.SetAccessRule($rule)
     Set-Acl $DatabasesFile $acl
-    Log "Установлены права записи для группы Users."
+    Log "Установлены права записи для $currentUser."
 } catch {
     # Fallback: use icacls if .NET ACL fails (some Windows locales/versions)
     Log "SetAccessRule failed, trying icacls..."
     try {
-        & icacls $DatabasesFile /grant "*S-1-5-32-545:(M)" 2>&1 | Out-Null
+        & icacls $DatabasesFile /grant "${currentUser}:(M)" 2>&1 | Out-Null
         Log "Права установлены через icacls."
     } catch {
         Log "Не удалось установить права: $($_.Exception.Message)"

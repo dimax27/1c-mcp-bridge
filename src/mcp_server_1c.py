@@ -66,6 +66,9 @@ log = logging.getLogger("mcp-1c")
 
 DEFAULT_LIMIT = int(os.environ.get("ONEC_DEFAULT_LIMIT", "1000"))
 HARD_LIMIT = int(os.environ.get("ONEC_HARD_LIMIT", "10000"))
+MAX_QUERY_LENGTH = int(os.environ.get("ONEC_MAX_QUERY_LENGTH", "10000"))
+MAX_COLUMNS = int(os.environ.get("ONEC_MAX_COLUMNS", "200"))
+MAX_PARAMETERS = int(os.environ.get("ONEC_MAX_PARAMETERS", "50"))
 
 
 def find_databases_file() -> Path:
@@ -492,6 +495,10 @@ def execute_query(
     """
     if not text or not text.strip():
         return {"error": "Пустой текст запроса"}
+    if len(text) > MAX_QUERY_LENGTH:
+        return {"error": f"Слишком длинный запрос ({len(text)} > {MAX_QUERY_LENGTH})"}
+    if parameters and len(parameters) > MAX_PARAMETERS:
+        return {"error": f"Слишком много параметров ({len(parameters)} > {MAX_PARAMETERS})"}
     limit = min(max(1, int(limit)), HARD_LIMIT)
 
     try:
@@ -530,6 +537,8 @@ def execute_query(
         columns_meta = []
         col_names = []
         for col in result.Колонки:
+            if len(col_names) >= MAX_COLUMNS:
+                break
             n = str(col.Имя)
             col_names.append(n)
             try:
