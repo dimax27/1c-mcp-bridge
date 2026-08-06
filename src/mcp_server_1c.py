@@ -239,7 +239,7 @@ def get_connection(db_key: str) -> Any:
     conn_str = cfg["connection_string"]
 
     log.info("Подключаюсь к '%s' через %s", db_key, progid)
-    connector = win32com.client.Dispatch(progid)
+    connector = win32com.client.gencache.EnsureDispatch(progid)
     conn = connector.Connect(conn_str)
     _tls.connections[db_key] = conn
 
@@ -604,6 +604,8 @@ def execute_query(
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
+_metadata_cache = {}
+
 @mcp.tool()
 def describe_object(path: str, database: str | None = None) -> dict:
     """Возвращает структуру объекта метаданных конфигурации.
@@ -620,6 +622,12 @@ def describe_object(path: str, database: str | None = None) -> dict:
     try:
         db_key = resolve_database(database)
         conn = get_connection(db_key)
+
+        # Return cached metadata (invalidated on server restart)
+        cache_key = (db_key, path)
+        if cache_key in _metadata_cache:
+            return _metadata_cache[cache_key]
+
         obj = resolve_metadata(conn, path)
         if obj is None:
             return {"error": f"Объект не найден: {path}", "database": db_key}
@@ -675,6 +683,7 @@ def describe_object(path: str, database: str | None = None) -> dict:
             except (AttributeError, pywintypes.com_error):
                 pass
 
+        _metadata_cache[cache_key] = result
         return result
 
     except ValueError as e:
