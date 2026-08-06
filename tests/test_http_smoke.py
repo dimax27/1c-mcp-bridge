@@ -238,3 +238,54 @@ def test_occupied_port_is_logged(start_server, tmp_path):
     assert _LOG_LINE_PORT_BUSY in text, (
         f"в логе нет записи об ошибке старта: {text[-500:]}"
     )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="нужен PowerShell/Windows")
+def test_installer_stops_running_server(start_server):
+    """installer/stop_http_server.ps1 должен останавливать запущенный мост.
+
+    Установщик вызывает этот скрипт в самом начале, чтобы старый сервер не
+    держал порт 8000 и файлы venv во время переустановки.
+    """
+    ctx = start_server()
+    assert ctx["proc"].poll() is None, "сервер должен быть запущен"
+
+    stop_script = REPO / "installer" / "stop_http_server.ps1"
+    assert stop_script.exists(), f"нет скрипта: {stop_script}"
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(stop_script),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"stop_http_server.ps1 упал: rc={result.returncode}\n"
+        f"stdout={result.stdout[-500:]}\nstderr={result.stderr[-500:]}"
+    )
+    assert "PORT_8000_FREE" in result.stdout, result.stdout[-500:]
+
+    # процесс моста должен завершиться
+    try:
+        code = ctx["proc"].wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        ctx["proc"].kill()
+        pytest.fail("stop_http_server.ps1 не остановил сервер моста")
+    assert code is not None
+
+    # порт должен освободиться (соединение отклоняется)
+    with socket.socket() as s:
+        s.settimeout(2)
+        try:
+            s.connect(("127.0.0.1", ctx["port"]))
+            pytest.fail("порт всё ещё принимает соединения")
+        except OSError:
+            pass  # ожидаемо: порт свободен

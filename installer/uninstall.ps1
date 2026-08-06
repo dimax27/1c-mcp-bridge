@@ -11,6 +11,18 @@ param()
 
 $ErrorActionPreference = 'Continue'
 
+# Останавливаем HTTP-сервер моста, если он ещё запущен (иначе он держит
+# файлы venv и порт 8000 на время удаления).
+$StopServerScript = Join-Path $PSScriptRoot 'stop_http_server.ps1'
+if (Test-Path $StopServerScript) {
+    try {
+        . $StopServerScript
+        Stop-BridgeHttpServer | Out-Null
+    } catch {
+        Write-Host "Не удалось остановить HTTP-сервер моста: $($_.Exception.Message)"
+    }
+}
+
 # When running as admin, $env:APPDATA points to admin's profile.
 # We need the interactive user's profile — try to find it.
 function Get-InteractiveAppData {

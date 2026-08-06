@@ -80,6 +80,7 @@ Source: "..\README.md";                  DestDir: "{app}";              Flags: i
 
 ; PowerShell-скрипты установки (вызываются из [Run])
 Source: "install.ps1";                   DestDir: "{app}\installer";    Flags: ignoreversion
+Source: "stop_http_server.ps1";          DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "test_connection.ps1";           DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "uninstall.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "detect_1c.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion

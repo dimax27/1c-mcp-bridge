@@ -50,6 +50,16 @@ trap {
 
 Log "Запуск install.ps1"
 
+# Останавливаем старый HTTP-сервер моста, если он ещё запущен: иначе новый
+# не сможет занять порт 8000, а удаление старого venv упрётся в блокировку.
+$StopServerScript = Join-Path $PSScriptRoot 'stop_http_server.ps1'
+if (Test-Path $StopServerScript) {
+    . $StopServerScript
+    Stop-BridgeHttpServer | Out-Null
+} else {
+    Log "WARNING: не найден $StopServerScript — пропускаю остановку HTTP-сервера"
+}
+
 # -----------------------------------------------------------------------------
 Stage "Чтение параметров мастера"
 # -----------------------------------------------------------------------------
@@ -167,7 +177,7 @@ if (Test-Path $VenvDir) {
         }
     }
     if (Test-Path $VenvDir) {
-        Log "Не удалось удалить $VenvDir. Закройте Claude Desktop полностью (Quit из трея) и попробуйте снова."
+        Log "Не удалось удалить $VenvDir. Убедитесь, что полностью закрыт Claude Desktop (Quit из трея) и остановлен HTTP-сервер моста (он останавливается автоматически в начале установки), затем попробуйте снова."
         throw "venv заблокирован: $VenvDir"
     }
 }
