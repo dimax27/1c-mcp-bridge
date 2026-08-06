@@ -64,6 +64,7 @@ log = logging.getLogger("mcp-1c")
 # Загрузка списка баз
 # ---------------------------------------------------------------------------
 
+from query_timeout import check_slow
 from credentials import build_conn_str, migrate_to_encrypted
 from config import (
     positive_env_int,
@@ -544,6 +545,7 @@ def execute_query(
         t0 = time.perf_counter()
         result = query.Выполнить()
         elapsed_ms = lambda: round((time.perf_counter() - t0) * 1000, 1)
+        check_slow(t0, db_key, text)
 
         try:
             empty = bool(result.Пустой())
