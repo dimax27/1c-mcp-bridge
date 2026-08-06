@@ -391,12 +391,24 @@ if not defined ONEC_DATABASES_FILE set ONEC_DATABASES_FILE=$DatabasesFile
 Log "Created npx launcher in $NpxDir"
 
 # --- Create silent VBS launcher for Qwen HTTP server (no console) ---
+$HttpToken = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | % { [char]$_ })
+$TokenFile = Join-Path $NpxDir '.http_token'
+[System.IO.File]::WriteAllText($TokenFile, $HttpToken, [System.Text.ASCIIEncoding]::new())
+Log "HTTP token saved to $TokenFile"
+
 $VbsLauncher = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
 $vbsContent = @"
 CreateObject("Wscript.Shell").Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000", 0, False
 "@
 [System.IO.File]::WriteAllText($VbsLauncher, $vbsContent, [System.Text.ASCIIEncoding]::new())
 Log "Created silent VBS launcher in $AppDir"
+Log ""
+Log "=============================================="
+Log "  QWEN DESKTOP SETUP"
+Log "=============================================="
+Log "  Server URL: http://127.0.0.1:8000/mcp/$HttpToken"
+Log "  (Token also saved to $TokenFile)"
+Log "=============================================="
 
 # List of supported MCP clients
 # Each client: id, name, dir (under %APPDATA%), config filename, optional subdir
