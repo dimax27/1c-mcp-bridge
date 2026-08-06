@@ -397,14 +397,15 @@ $TokenFile = Join-Path $NpxDir '.http_token'
 Log "HTTP token saved to $TokenFile"
 
 $VbsLauncher = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
+$HttpLogFile = Join-Path $NpxDir 'http-server.log'
 $vbsContent = @"
 Set shell = CreateObject("Wscript.Shell")
 shell.Environment("PROCESS")("ONEC_DATABASES_FILE") = "$DatabasesFile"
 shell.Environment("PROCESS")("ONEC_HTTP_TOKEN") = "$HttpToken"
-shell.Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000", 0, False
+shell.Run """$VenvPython"" ""$(Join-Path $AppDir 'mcp_server_1c_http.py')"" --port 8000 --log-file ""$HttpLogFile""", 0, False
 "@
 [System.IO.File]::WriteAllText($VbsLauncher, $vbsContent, [System.Text.ASCIIEncoding]::new())
-Log "Created silent VBS launcher in $AppDir"
+Log "Created silent VBS launcher in $AppDir (лог: $HttpLogFile)"
 # Токен — секрет: ограничиваем ACL, как у databases.json
 Set-DatabaseFileAcl $TokenFile
 Log ""
