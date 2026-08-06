@@ -20,7 +20,7 @@
 #define NumericPart Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher   "Koovykin D."
 #define MyAppCopyright   "Copyright (C) 2026 Koovykin D."
-#define MyAppURL         "https://github.com/REPLACE_ME/1c-mcp-bridge"
+#define MyAppURL         "https://github.com/dimax27/1c-mcp-bridge"
 #define MyAppExeName     "mcp_server_1c.py"
 #define PythonVersion    "3.12.7"
 #define PythonInstaller  "python-" + PythonVersion + "-amd64.exe"

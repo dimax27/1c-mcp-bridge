@@ -239,7 +239,14 @@ def get_connection(db_key: str) -> Any:
     conn_str = cfg["connection_string"]
 
     log.info("Подключаюсь к '%s' через %s", db_key, progid)
-    connector = win32com.client.gencache.EnsureDispatch(progid)
+    # EnsureDispatch кеширует type library (быстрее), но может не работать
+    # у обычного пользователя (PermissionError при записи gen_py в venv).
+    try:
+        connector = win32com.client.gencache.EnsureDispatch(progid)
+    except (OSError, PermissionError, pywintypes.com_error) as exc:
+        log.warning("EnsureDispatch(%s) недоступен, использую Dispatch: %s",
+                    progid, exc)
+        connector = win32com.client.Dispatch(progid)
     conn = connector.Connect(conn_str)
     _tls.connections[db_key] = conn
 
@@ -604,7 +611,25 @@ def execute_query(
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
-_metadata_cache = {}
+from threading import RLock
+from copy import deepcopy
+
+_metadata_cache: dict[tuple[str, str], dict] = {}
+_metadata_cache_lock = RLock()
+MAX_METADATA_CACHE = 512
+
+
+def _cached_metadata_get(db_key: str, path: str) -> dict | None:
+    with _metadata_cache_lock:
+        value = _metadata_cache.get((db_key, path))
+        return deepcopy(value) if value is not None else None
+
+
+def _cached_metadata_put(db_key: str, path: str, result: dict) -> None:
+    with _metadata_cache_lock:
+        if len(_metadata_cache) >= MAX_METADATA_CACHE:
+            _metadata_cache.clear()
+        _metadata_cache[(db_key, path)] = deepcopy(result)
 
 @mcp.tool()
 def describe_object(path: str, database: str | None = None) -> dict:
@@ -623,10 +648,10 @@ def describe_object(path: str, database: str | None = None) -> dict:
         db_key = resolve_database(database)
         conn = get_connection(db_key)
 
-        # Return cached metadata (invalidated on server restart)
-        cache_key = (db_key, path)
-        if cache_key in _metadata_cache:
-            return _metadata_cache[cache_key]
+        # Return cached metadata (invalidated on server restart or cache clear)
+        cached = _cached_metadata_get(db_key, path)
+        if cached is not None:
+            return cached
 
         obj = resolve_metadata(conn, path)
         if obj is None:
@@ -683,7 +708,7 @@ def describe_object(path: str, database: str | None = None) -> dict:
             except (AttributeError, pywintypes.com_error):
                 pass
 
-        _metadata_cache[cache_key] = result
+        _cached_metadata_put(db_key, path, result)
         return result
 
     except ValueError as e:
