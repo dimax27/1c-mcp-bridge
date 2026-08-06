@@ -243,7 +243,7 @@ def get_connection(db_key: str) -> Any:
     # у обычного пользователя (PermissionError при записи gen_py в venv).
     try:
         connector = win32com.client.gencache.EnsureDispatch(progid)
-    except (OSError, PermissionError, pywintypes.com_error) as exc:
+    except Exception as exc:
         log.warning("EnsureDispatch(%s) недоступен, использую Dispatch: %s",
                     progid, exc)
         connector = win32com.client.Dispatch(progid)
@@ -863,7 +863,7 @@ _patch_tool_descriptions()
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Стартую 1C MCP Bridge v0.4.2")
+    log.info("Стартую 1C MCP Bridge v0.4.3")
     log.info("Файл со списком баз: %s", find_databases_file())
     log.info("Базы: %s", list_database_keys())
     log.info("По умолчанию: %s", DB_CONFIG["default_database"])

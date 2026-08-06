@@ -151,7 +151,7 @@ Qwen Desktop разрешает только `npx`/`uvx` для stdio MCP-сер
 ```powershell
 git clone https://github.com/dimax27/1c-mcp-bridge.git
 cd 1c-mcp-bridge
-$env:APP_VERSION = '0.4.0'
+$env:APP_VERSION = '0.4.3'
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\setup.iss
 # Готовый .exe появится в .\dist\
 ```
@@ -179,7 +179,7 @@ Python и MCP-клиенты.
 
 ## Roadmap
 
-* **v0.4.2** *(текущая)* — мульти-клиент (Claude, Qwen, Kimi, Reasonix), HTTP-сервер, импорт JSON, безопасность ACL.
+* **v0.4.3** *(текущая)* — мульти-клиент (Claude, Qwen, Kimi, Reasonix), HTTP-сервер, импорт JSON, безопасность ACL.
 * **v0.5.0** *(планируется)* — DPAPI для паролей, токенная защита HTTP, тайм-ауты COM, юнит-тесты, подпись установщика.
 
 ## Лицензия
