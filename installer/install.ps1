@@ -248,6 +248,28 @@ if (-not (Test-Path $DataDir)) {
 }
 $DatabasesFile = Join-Path $DataDir 'databases.json'
 
+# ---- ACL helper: set clean permissions on databases.json ----
+function Set-DatabaseFileAcl {
+    param($FilePath)
+    # Extract interactive username from AppData path
+    $userName = ($UserAppData -split '\\AppData\\')[0] -replace '.*\\', ''
+    if (-not $userName) { Log "WARNING: cannot determine user from $UserAppData"; return }
+    try {
+        $userSid = (New-Object System.Security.Principal.NTAccount($userName)).Translate([System.Security.Principal.SecurityIdentifier])
+        $acl = New-Object System.Security.AccessControl.FileSecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new('S-1-5-18', 'FullControl', 'Allow'))
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new('S-1-5-32-544', 'FullControl', 'Allow'))
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($userSid, 'Modify', 'Allow'))
+        Set-Acl -LiteralPath $FilePath -AclObject $acl
+        Log "ACL: SYSTEM+Admins(Full), $userName(Modify), inheritance off"
+    } catch {
+        Log "ACL .NET failed, trying icacls..."
+        & icacls.exe $FilePath /reset /grant:r "SYSTEM:(F)" "BUILTIN\Administrators:(F)" "${userName}:(M)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Log "icacls exit code $LASTEXITCODE" } else { Log "ACL via icacls for $userName" }
+    }
+}
+
 # --- Импорт существующего databases.json (из мастера установки) ---
 if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
     Log "Импортирую databases.json из $ImportDbFile ..."
@@ -260,23 +282,8 @@ if ($ImportDbFile -and (Test-Path $ImportDbFile)) {
         Copy-Item $ImportDbFile $DatabasesFile -Force
         Log "Импортирован $DatabasesFile из $ImportDbFile"
 
-        # Права на запись
-        try {
-            $acl = Get-Acl $DatabasesFile
-            $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                $currentUser, "Modify", "Allow")
-            $acl.SetAccessRule($rule)
-            Set-Acl $DatabasesFile $acl
-            Log "Установлены права записи для $currentUser."
-        } catch {
-            try {
-                & icacls $DatabasesFile /grant "${currentUser}:(M)" 2>&1 | Out-Null
-                Log "Права установлены через icacls."
-            } catch {
-                Log "Не удалось установить права: $($_.Exception.Message)"
-            }
-        }
+        # Set clean ACL for interactive user
+        Set-DatabaseFileAcl $DatabasesFile
     } catch {
         Log "Ошибка импорта: $($_.Exception.Message). Создаю новую базу вручную."
         $ImportDbFile = $null  # сбрасываем, чтобы сработал ручной ввод ниже
@@ -336,25 +343,8 @@ $dbJson = $dbConfig | ConvertTo-Json -Depth 10
 [System.IO.File]::WriteAllText($DatabasesFile, $dbJson, [System.Text.UTF8Encoding]::new($false))
 Log "Записан $DatabasesFile (база '$DbKey')"
 
-# Даём права на запись текущему пользователю
-try {
-    $acl = Get-Acl $DatabasesFile
-    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        $currentUser, "Modify", "Allow")
-    $acl.SetAccessRule($rule)
-    Set-Acl $DatabasesFile $acl
-    Log "Установлены права записи для $currentUser."
-} catch {
-    # Fallback: use icacls if .NET ACL fails (some Windows locales/versions)
-    Log "SetAccessRule failed, trying icacls..."
-    try {
-        & icacls $DatabasesFile /grant "${currentUser}:(M)" 2>&1 | Out-Null
-        Log "Права установлены через icacls."
-    } catch {
-        Log "Не удалось установить права: $($_.Exception.Message)"
-    }
-}
+# Set clean ACL for interactive user
+Set-DatabaseFileAcl $DatabasesFile
 
 # Удаляем legacy-файл (если был)
 if ((Test-Path $LegacyFile) -and ($LegacyFile -ne $DatabasesFile)) {

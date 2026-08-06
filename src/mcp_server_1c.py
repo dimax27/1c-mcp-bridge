@@ -66,9 +66,22 @@ log = logging.getLogger("mcp-1c")
 
 DEFAULT_LIMIT = int(os.environ.get("ONEC_DEFAULT_LIMIT", "1000"))
 HARD_LIMIT = int(os.environ.get("ONEC_HARD_LIMIT", "10000"))
-MAX_QUERY_LENGTH = int(os.environ.get("ONEC_MAX_QUERY_LENGTH", "10000"))
-MAX_COLUMNS = int(os.environ.get("ONEC_MAX_COLUMNS", "200"))
-MAX_PARAMETERS = int(os.environ.get("ONEC_MAX_PARAMETERS", "50"))
+
+
+def _positive_env_int(name: str, default: int, maximum: int) -> int:
+    raw = os.environ.get(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got: {raw!r}") from exc
+    if not 1 <= value <= maximum:
+        raise RuntimeError(f"{name} must be 1..{maximum}, got: {value}")
+    return value
+
+
+MAX_QUERY_LENGTH = _positive_env_int("ONEC_MAX_QUERY_LENGTH", 10000, 1000000)
+MAX_COLUMNS = _positive_env_int("ONEC_MAX_COLUMNS", 200, 10000)
+MAX_PARAMETERS = _positive_env_int("ONEC_MAX_PARAMETERS", 50, 1000)
 
 
 def find_databases_file() -> Path:
@@ -499,7 +512,11 @@ def execute_query(
         return {"error": f"Слишком длинный запрос ({len(text)} > {MAX_QUERY_LENGTH})"}
     if parameters and len(parameters) > MAX_PARAMETERS:
         return {"error": f"Слишком много параметров ({len(parameters)} > {MAX_PARAMETERS})"}
-    limit = min(max(1, int(limit)), HARD_LIMIT)
+    try:
+        requested_limit = int(limit)
+    except (TypeError, ValueError):
+        return {"error": "Параметр limit должен быть целым числом"}
+    limit = min(max(1, requested_limit), HARD_LIMIT)
 
     try:
         db_key = resolve_database(database)
@@ -534,11 +551,14 @@ def execute_query(
                 "execution_time_ms": elapsed_ms(),
             }
 
+        # Collect columns (may be truncated)
+        all_cols = list(result.Колонки)
+        total_column_count = len(all_cols)
+        columns_truncated = total_column_count > MAX_COLUMNS
+        cols_to_process = all_cols[:MAX_COLUMNS]
         columns_meta = []
         col_names = []
-        for col in result.Колонки:
-            if len(col_names) >= MAX_COLUMNS:
-                break
+        for col in cols_to_process:
             n = str(col.Имя)
             col_names.append(n)
             try:
@@ -569,6 +589,8 @@ def execute_query(
             "rows": rows,
             "row_count": len(rows),
             "truncated": truncated,
+            "columns_truncated": columns_truncated,
+            "total_column_count": total_column_count,
             "execution_time_ms": elapsed_ms(),
         }
 

@@ -9,7 +9,7 @@ Start via Start Menu shortcut or:
 Security: binds to 127.0.0.1 by default. Use --insecure-host to bind
 to other interfaces (not recommended — any local process can access it).
 """
-import sys, os, secrets
+import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from mcp_server_1c import mcp, log, DB_CONFIG
 

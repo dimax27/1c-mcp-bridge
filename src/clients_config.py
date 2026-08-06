@@ -165,30 +165,38 @@ def read_client_config(client: dict) -> dict:
 def write_client_config(client: dict, config: dict) -> None:
     """Write a client's MCP config file atomically (UTF-8 without BOM).
 
-    Writes to a temp file first, then replaces the original.
-    Keeps a .bak backup of the previous version.
+    Copies existing config to .bak, writes to unique temp file,
+    then atomically replaces the original via os.replace().
     """
-    import json
+    import json, os, shutil, tempfile
 
     path = client_config_path(client)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     raw = json.dumps(config, ensure_ascii=False, indent=2)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    backup = path.with_suffix(path.suffix + ".bak")
 
-    # Write to temp file
-    tmp_path.write_text(raw, encoding="utf-8")
-
-    # Backup existing config if present
+    # Backup existing config first (so we never lose it)
     if path.exists():
-        bak_path = path.with_suffix(path.suffix + ".bak")
-        try:
-            path.replace(bak_path)
-        except OSError:
-            pass
+        shutil.copy2(path, backup)
 
-    # Atomic rename
-    tmp_path.replace(path)
+    # Write to unique temp file in the same directory
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    tmp_path = Path(tmp_name)
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _mcp_key(client: dict) -> str:
