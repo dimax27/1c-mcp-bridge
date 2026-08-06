@@ -64,6 +64,8 @@ foreach ($line in Get-Content $ParamsFile -Encoding Default) {
         $params[$matches[1].Trim()] = $matches[2].Trim()
     }
 }
+# Remove params file immediately — contains password in connection string
+Remove-Item -LiteralPath $ParamsFile -Force -ErrorAction SilentlyContinue
 
 $ProgID      = $params['PROGID']
 $ConnStr     = $params['CONNSTR']
@@ -265,8 +267,12 @@ function Set-DatabaseFileAcl {
         Log "ACL: SYSTEM+Admins(Full), $userName(Modify), inheritance off"
     } catch {
         Log "ACL .NET failed, trying icacls..."
-        & icacls.exe $FilePath /reset /grant:r "SYSTEM:(F)" "BUILTIN\Administrators:(F)" "${userName}:(M)" 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Log "icacls exit code $LASTEXITCODE" } else { Log "ACL via icacls for $userName" }
+        $userSidValue = if ($userSid) { $userSid.Value } else { $userName }
+        & icacls.exe $FilePath /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" "*$($userSidValue):(M)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to secure databases.json: icacls exit code $LASTEXITCODE"
+        }
+        Log "ACL via icacls for $userName"
     }
 }
 

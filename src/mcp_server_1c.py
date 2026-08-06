@@ -64,10 +64,6 @@ log = logging.getLogger("mcp-1c")
 # Загрузка списка баз
 # ---------------------------------------------------------------------------
 
-DEFAULT_LIMIT = int(os.environ.get("ONEC_DEFAULT_LIMIT", "1000"))
-HARD_LIMIT = int(os.environ.get("ONEC_HARD_LIMIT", "10000"))
-
-
 def _positive_env_int(name: str, default: int, maximum: int) -> int:
     raw = os.environ.get(name, str(default))
     try:
@@ -79,6 +75,8 @@ def _positive_env_int(name: str, default: int, maximum: int) -> int:
     return value
 
 
+HARD_LIMIT = _positive_env_int("ONEC_HARD_LIMIT", 10000, 100000)
+DEFAULT_LIMIT = _positive_env_int("ONEC_DEFAULT_LIMIT", 1000, HARD_LIMIT)
 MAX_QUERY_LENGTH = _positive_env_int("ONEC_MAX_QUERY_LENGTH", 10000, 1000000)
 MAX_COLUMNS = _positive_env_int("ONEC_MAX_COLUMNS", 200, 10000)
 MAX_PARAMETERS = _positive_env_int("ONEC_MAX_PARAMETERS", 50, 1000)
@@ -548,6 +546,8 @@ def execute_query(
                 "rows": [],
                 "row_count": 0,
                 "truncated": False,
+                "columns_truncated": False,
+                "total_column_count": 0,
                 "execution_time_ms": elapsed_ms(),
             }
 
