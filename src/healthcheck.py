@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import json
 import os
+import traceback
 
 EXPECTED_TOOLS = {
     "describe_object",
@@ -82,6 +83,22 @@ async def _probe_com(client, databases: list[str]) -> list[str]:
     return failures
 
 
+def check_databases_payload(payload: dict) -> tuple[int, str, list[str]]:
+    """Валидация ответа list_databases.
+
+    Возвращает (код, маркер, список ключей баз): 0 — всё корректно;
+    2 — список баз пуст/не является объектом/нет default_database.
+    """
+    databases_payload = payload.get("databases")
+    if not isinstance(databases_payload, dict):
+        return 2, "HEALTH_DATABASES_INVALID", []
+    if not databases_payload:
+        return 2, "HEALTH_NO_DATABASES", []
+    if payload.get("default_database") not in databases_payload:
+        return 2, "HEALTH_DEFAULT_DATABASE_INVALID", []
+    return 0, "", sorted(databases_payload.keys())
+
+
 async def run(args) -> int:
     token = os.environ.get("ONEC_HTTP_TOKEN", "").strip()
     if not token:
@@ -105,25 +122,17 @@ async def run(args) -> int:
                 return 2
             text = _result_text(result)
             payload = json.loads(text) if text else {}
-            databases_payload = payload.get("databases")
-            if not isinstance(databases_payload, dict):
-                print("HEALTH_DATABASES_INVALID")
-                return 2
-            if not databases_payload:
-                print("HEALTH_NO_DATABASES")
-                return 2
-            default_database = payload.get("default_database")
-            if default_database not in databases_payload:
-                print("HEALTH_DEFAULT_DATABASE_INVALID")
-                return 2
-            databases = sorted(databases_payload.keys())
+            code, marker, databases = check_databases_payload(payload)
+            if code != 0:
+                print(marker)
+                return code
 
             if args.com:
                 selected = [args.database] if args.database else databases
                 if not selected:
                     print("HEALTH_COM_NO_DATABASES")
                     return 2
-                if args.database and args.database not in databases_payload:
+                if args.database and args.database not in databases:
                     print(
                         "HEALTH_DATABASE_NOT_FOUND database="
                         + ascii_json(args.database)
@@ -142,7 +151,10 @@ async def run(args) -> int:
             print(f"HEALTH_OK tools={len(names)} databases={len(databases)}")
             return 0
     except Exception as exc:  # noqa: BLE001 — причина ошибки выводится в консоль
+        # stdout остаётся ASCII-маркером; полные детали (в т.ч. внутренние
+        # ошибки, а не только сетевое подключение) — в stderr
         print("HEALTH_CONNECT_ERROR:", type(exc).__name__)
+        traceback.print_exception(exc)
         return 1
 
 

@@ -39,7 +39,7 @@ jobs:
 
       - name: Ruff check
         shell: pwsh
-        run: ruff check src installer --ignore E501,E722
+        run: ruff check src installer tests --ignore E501,E722
 
       - name: Pytest
         shell: pwsh
