@@ -99,12 +99,12 @@ Name: "{group}\1C Bridge Manager"; \
   WorkingDir: "{app}"; \
   IconFilename: "{app}\assets\icon.ico"; \
   Comment: "Управление списком информационных баз 1С"
-Name: "{group}\1C Bridge (HTTP-сервер для Qwen)"; \
+Name: "{group}\1C Bridge (HTTP-сервер)"; \
   Filename: "wscript.exe"; \
   Parameters: """{app}\start_1c_bridge_silent.vbs"""; \
   WorkingDir: "{app}"; \
   IconFilename: "{app}\assets\icon.ico"; \
-  Comment: "Запускает HTTP-сервер для Qwen Desktop (без окна). Остановка — Диспетчер задач → python.exe"
+  Comment: "Запускает HTTP-сервер моста для Qwen, ChatGPT/Codex и др. (без окна). Остановка — Диспетчер задач → python.exe"
 Name: "{group}\Открыть папку установки"; Filename: "{app}"
 Name: "{group}\Удалить {#MyAppName}";    Filename: "{uninstallexe}"
 Name: "{group}\Документация";            Filename: "{#MyAppURL}"
