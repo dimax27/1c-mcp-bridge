@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-mcp = pytest.importorskip("mcp")  # нужен клиент mcp (входит в requirements.txt)
+pytest.importorskip("mcp")  # нужен клиент mcp (входит в requirements.txt)
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "src"
