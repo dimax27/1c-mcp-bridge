@@ -16,7 +16,7 @@
 
 Код:      0 = проверка пройдена;
           1 = сервер недоступен / нет токена / инструменты не те;
-          2 = list_databases вернул ошибку;
+          2 = list_databases вернул ошибку или список баз пуст/некорректен;
           3 = COM-проба (--com) не прошла хотя бы для одной базы.
 Вывод — ASCII-маркеры (HEALTH_OK / HEALTH_TOOLS_MISSING / HEALTH_COM_FAIL...),
 имена баз и ошибок экранируются (ensure_ascii), безопасно для журналов.
@@ -49,6 +49,11 @@ def _result_text(result) -> str:
     )
 
 
+def ascii_json(value) -> str:
+    """Компактный JSON с ensure_ascii: ключи баз и ошибки всегда ASCII."""
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
 async def _probe_com(client, databases: list[str]) -> list[str]:
     """Проверяет COM/метаданные каждой базы. Возвращает список неудач."""
     failures: list[str] = []
@@ -71,7 +76,7 @@ async def _probe_com(client, databases: list[str]) -> list[str]:
             )
         except Exception:  # noqa: BLE001 — любая ошибка = провал пробы
             ok = False
-        print(f"HEALTH_COM {db} {'OK' if ok else 'FAIL'}")
+        print(f"HEALTH_COM database={ascii_json(db)} status={'OK' if ok else 'FAIL'}")
         if not ok:
             failures.append(db)
     return failures
@@ -100,16 +105,36 @@ async def run(args) -> int:
                 return 2
             text = _result_text(result)
             payload = json.loads(text) if text else {}
-            databases = sorted((payload.get("databases") or {}).keys())
+            databases_payload = payload.get("databases")
+            if not isinstance(databases_payload, dict):
+                print("HEALTH_DATABASES_INVALID")
+                return 2
+            if not databases_payload:
+                print("HEALTH_NO_DATABASES")
+                return 2
+            default_database = payload.get("default_database")
+            if default_database not in databases_payload:
+                print("HEALTH_DEFAULT_DATABASE_INVALID")
+                return 2
+            databases = sorted(databases_payload.keys())
 
             if args.com:
                 selected = [args.database] if args.database else databases
                 if not selected:
                     print("HEALTH_COM_NO_DATABASES")
-                    return 0
+                    return 2
+                if args.database and args.database not in databases_payload:
+                    print(
+                        "HEALTH_DATABASE_NOT_FOUND database="
+                        + ascii_json(args.database)
+                    )
+                    return 3
                 failures = await _probe_com(client, selected)
                 if failures:
-                    print("HEALTH_COM_FAIL:", ",".join(failures))
+                    print(
+                        "HEALTH_COM_FAIL databases="
+                        + ascii_json(failures)
+                    )
                     return 3
                 print("HEALTH_COM_OK")
                 return 0
@@ -138,6 +163,8 @@ def main() -> int:
         help="в режиме --com проверить только одну базу",
     )
     args = parser.parse_args()
+    if args.database and not args.com:
+        parser.error("--database требует --com")
     return asyncio.run(run(args))
 
 

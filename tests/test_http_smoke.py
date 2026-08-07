@@ -72,21 +72,25 @@ def start_server(tmp_path):
         log_file: Path | None = None,
         occupy_port: bool = False,
         port: int | None = None,
+        databases: dict | None = None,
     ) -> dict:
+        if databases is None:
+            databases = {
+                "smoke": {
+                    "description": "smoke test (без 1С)",
+                    "progid": "V83.COMConnector",
+                    "connection_string": 'Srvr="localhost";Ref="smoke"',
+                    "dll_path": "",
+                }
+            }
+        default_db = "smoke" if "smoke" in databases else next(iter(databases), "")
         db = tmp_path / f"databases-{len(procs)}.json"
         db.write_text(
             json.dumps(
                 {
                     "version": 1,
-                    "default_database": "smoke",
-                    "databases": {
-                        "smoke": {
-                            "description": "smoke test (без 1С)",
-                            "progid": "V83.COMConnector",
-                            "connection_string": 'Srvr="localhost";Ref="smoke"',
-                            "dll_path": "",
-                        }
-                    },
+                    "default_database": default_db,
+                    "databases": databases,
                 },
                 ensure_ascii=False,
             ),
@@ -301,10 +305,98 @@ def test_shared_healthcheck_com_probe_fails_on_unreachable_db(start_server):
     )
     # сервер MCP отвечает, но база 'smoke' не подключается к 1С -> код 3
     assert res.returncode == 3, f"ожидался код 3: rc={res.returncode}\n{res.stdout[-600:]}"
-    assert "HEALTH_COM smoke FAIL" in res.stdout, res.stdout[-600:]
-    assert "HEALTH_COM_FAIL: smoke" in res.stdout, res.stdout[-600:]
+    assert 'HEALTH_COM database="smoke" status=FAIL' in res.stdout, res.stdout[-600:]
+    assert 'HEALTH_COM_FAIL databases=["smoke"]' in res.stdout, res.stdout[-600:]
     # вывод — только ASCII (имена/ошибки экранируются)
     res.stdout.encode("ascii")  # не должно упасть с UnicodeEncodeError
+
+
+def test_healthcheck_cyrillic_db_key_ascii(start_server):
+    """Ключ базы с кириллицей экранируется ensure_ascii: вывод остаётся ASCII."""
+    ctx = start_server(
+        databases={
+            "Бухгалтерия": {
+                "description": "БП (без 1С)",
+                "progid": "V83.COMConnector",
+                "connection_string": 'Srvr="localhost";Ref="buh"',
+                "dll_path": "",
+            }
+        }
+    )
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = _TOKEN
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    res = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py"), "--com"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env=env,
+    )
+    assert res.returncode == 3, f"rc={res.returncode}\n{res.stdout[-600:]}"
+    # в stdout — escape-последовательность, а не «сырая» кириллица
+    assert "Бухгалтерия" not in res.stdout
+    assert r"\u0411\u0443\u0445\u0433\u0430\u043b\u0442\u0435\u0440\u0438\u044f" in res.stdout
+    res.stdout.encode("ascii")
+
+
+def test_healthcheck_empty_databases_fails(start_server):
+    """Пустой список баз (сервер поднялся, но баз нет) — это ошибка (код 2)."""
+    ctx = start_server(databases={})
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = _TOKEN
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    res = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    assert res.returncode == 2, f"rc={res.returncode}\n{res.stdout[-600:]}"
+    assert "HEALTH_NO_DATABASES" in res.stdout, res.stdout[-600:]
+
+
+def test_healthcheck_database_requires_com(start_server):
+    """--database без --com отклоняется парсером (код 2)."""
+    ctx = start_server()
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = _TOKEN
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    res = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py"), "--database", "smoke"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    assert res.returncode == 2, f"rc={res.returncode}\n{res.stdout[-300:]}\n{res.stderr[-300:]}"
+    assert "--database" in res.stderr
+
+
+def test_healthcheck_unknown_database_fails(start_server):
+    """--com --database <несуществующий> -> HEALTH_DATABASE_NOT_FOUND, код 3."""
+    ctx = start_server()
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = _TOKEN
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    res = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py"), "--com", "--database", "NOPE"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    assert res.returncode == 3, f"rc={res.returncode}\n{res.stdout[-600:]}"
+    assert "HEALTH_DATABASE_NOT_FOUND" in res.stdout, res.stdout[-600:]
 
 
 def test_installer_stops_only_target_server(start_server, tmp_path):

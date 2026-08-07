@@ -8,4 +8,4 @@
 
 import os
 
-VERSION = (os.environ.get("APP_VERSION", "") or "0.5.8").lstrip("v")
+VERSION = (os.environ.get("APP_VERSION", "") or "0.5.11").lstrip("v")

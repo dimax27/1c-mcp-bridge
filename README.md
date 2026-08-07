@@ -70,7 +70,7 @@ Reasonix, ChatGPT Desktop) напрямую к одной или несколь�
 ## Установка
 
 1. Скачайте `1cMcpBridge-Setup-<версия>.exe` со страницы
-   [Releases](../../releases/latest) (актуальная версия — **v0.5.8**).
+   [Releases](../../releases/latest) (актуальная версия — **v0.5.11**).
 2. Запустите от имени администратора (нужно для регистрации COM-коннектора).
 3. Пройдите шаги мастера: тип базы (файловая или клиент-серверная), параметры
    подключения, краткое имя базы и тест подключения.
@@ -294,10 +294,12 @@ HTTP-сервер слушает только `127.0.0.1:8000`. Журнал —
    $env:ONEC_HTTP_TOKEN = (Get-Content "$env:ProgramData\1cMcpBridge\.http_token" -Raw).Trim()
    & "$env:ProgramFiles\1cMcpBridge\.venv\Scripts\python.exe" "$env:ProgramFiles\1cMcpBridge\healthcheck.py" --com
    ```
-   Успех: `HEALTH_COM_OK`, код 0. При ошибке выводится `HEALTH_COM_FAIL: <базы>`
-   и код 3. Тот же скрипт без `--com` (или с `--database <ключ>` для одной базы)
-   используется установщиком и ярлыком «Перезапустить HTTP-сервер» — проверки
-   всегда одинаковые.
+   Успех: `HEALTH_COM_OK`, код 0. При ошибке выводится
+   `HEALTH_COM_FAIL databases=[...]` и код 3.
+   Установщик и ярлык «Перезапустить HTTP-сервер» используют **базовый**
+   health-check (без `--com`): HTTP, 5 инструментов, `list_databases` со
+   списком баз. Глубокая COM-проверка — только вручную с `--com`; для одной
+   базы — `--com --database <ключ>`.
 
 ## Сборка из исходников
 
@@ -311,12 +313,12 @@ ruff check src installer tests --ignore E501,E722
 python -m pytest tests -q
 
 # сборка установщика (Inno Setup 6)
-$env:APP_VERSION = "0.5.8"
+$env:APP_VERSION = "0.5.11"
 New-Item -ItemType Directory -Path dist -Force | Out-Null
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp installer/setup.iss
 ```
 
-Готовый `.exe` появится в `.\dist\` с именем `1cMcpBridge-Setup-0.5.8.exe`.
+Готовый `.exe` появится в `.\dist\` с именем `1cMcpBridge-Setup-0.5.11.exe`.
 Версия запекается в `src/version.py` при сборке (сервер показывает версию
 установщика), в репозитории дефолт — последний релиз.
 
@@ -330,7 +332,13 @@ stdout).
 
 ## Roadmap
 
-* **v0.5.8** *(текущая)* — починка CI (кодировка вывода PowerShell в тесте,
+* **v0.5.11** *(текущая)* — healthcheck `--com`: ASCII-safe проверка
+  COM/метаданных каждой базы (ключи экранируются `ensure_ascii`), строгая
+  валидация списка баз (пустой список = ошибка), `--com --database <ключ>`,
+  инструкция чтения UTF-8-журнала.
+* **v0.5.10** — единая кодировка UTF-8: журналы и их чтение
+  (`-Encoding UTF8`), роли процессов (лаунчер/рабочий) в статусе.
+* **v0.5.8** — починка CI (кодировка вывода PowerShell в тесте,
   невалидный SHA `actions/setup-python` в ci.yml), надёжный lifecycle
   HTTP-сервера (строгий MCP health-check в установщике и ярлыке «Перезапустить»,
   проверка результата остановки), единый `healthcheck.py`, DPAPI-credential не
