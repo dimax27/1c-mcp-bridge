@@ -17,7 +17,7 @@ LEGACY_CFG = {
     "description": "УТ 10.3",
     "progid": "V83.COMConnector",
     "connection_string": (
-        "Srvr=192.168.0.35;Ref=ut10;Usr=\"Кувыкин Д.А.\";Pwd=\"1с\""
+        "Srvr=192.168.1.100;Ref=ut10;Usr=\"Иванов И.И.\";Pwd=\"1с\""
     ),
 }
 
@@ -25,7 +25,7 @@ DPAPI_CFG = {
     "enabled": True,
     "description": "УТ 10.3",
     "progid": "V83.COMConnector",
-    "connection_string": "Srvr=192.168.0.35;Ref=ut10;Usr=\"Кувыкин Д.А.\"",
+    "connection_string": "Srvr=192.168.1.100;Ref=ut10;Usr=\"Иванов И.И.\"",
     "notes": "",
     "credential": {"provider": "dpapi-current-user", "blob": b"\x01\x02\x03"},
 }
@@ -37,7 +37,7 @@ def test_assemble_preserves_credential_and_strips_pwd():
         enabled=True,
         description="Новое описание",
         progid="V83.COMConnector",
-        connection_string='Srvr=192.168.0.35;Ref=ut10;Usr="Кувыкин Д.А.";Pwd="другое"',
+        connection_string='Srvr=192.168.1.100;Ref=ut10;Usr="Иванов И.И.";Pwd="другое"',
         notes="изменили описание",
         password_modified=False,
     )
@@ -46,7 +46,7 @@ def test_assemble_preserves_credential_and_strips_pwd():
     # credential сохранён, Pwd= вырезан из строки
     assert cfg["credential"] == DPAPI_CFG["credential"]
     assert ";Pwd=" not in cfg["connection_string"]
-    assert cfg["connection_string"].endswith('Usr="Кувыкин Д.А."')
+    assert cfg["connection_string"].endswith('Usr="Иванов И.И."')
 
 
 def test_assemble_new_password_replaces_credential():
@@ -55,7 +55,7 @@ def test_assemble_new_password_replaces_credential():
         enabled=True,
         description="УТ",
         progid="V83.COMConnector",
-        connection_string='Srvr=192.168.0.35;Ref=ut10;Usr="Кувыкин Д.А.";Pwd="новый"',
+        connection_string='Srvr=192.168.1.100;Ref=ut10;Usr="Иванов И.И.";Pwd="новый"',
         notes="",
         password_modified=True,
     )
@@ -101,7 +101,7 @@ def test_switch_to_windows_auth_drops_credential():
         enabled=True,
         description="УТ",
         progid="V83.COMConnector",
-        connection_string="Srvr=192.168.0.35;Ref=ut10",  # без Usr — Windows auth
+        connection_string="Srvr=192.168.1.100;Ref=ut10",  # без Usr — Windows auth
         notes="",
         password_modified=False,
     )
@@ -117,7 +117,7 @@ def test_username_change_without_password_does_not_reuse_old_credential():
         enabled=True,
         description="УТ",
         progid="V83.COMConnector",
-        connection_string='Srvr=192.168.0.35;Ref=ut10;Usr="Новый Пользователь"',
+        connection_string='Srvr=192.168.1.100;Ref=ut10;Usr="Новый Пользователь"',
         notes="",
         password_modified=False,
     )

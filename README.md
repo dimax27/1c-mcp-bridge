@@ -293,7 +293,7 @@ HTTP-сервер слушает только `127.0.0.1:8000`. Журнал —
   "enabled": true,
   "description": "УТ 10.3 — управленческая база",
   "progid": "V83.COMConnector",
-  "connection_string": "Srvr=192.168.0.35;Ref=ut10;Usr=\"Кувыкин Д.А.\"",
+  "connection_string": "Srvr=192.168.1.100;Ref=ut10;Usr=\"Иванов И.И.\"",
   "notes": "Основная управленческая база ...",
   "dll_path": "C:\\Program Files\\1cv8\\8.3.27.1859\\bin\\comcntr.dll",
   "credential": { "provider": "dpapi-current-user", "blob": "..." }
