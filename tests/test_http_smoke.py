@@ -246,6 +246,11 @@ def test_occupied_port_is_logged(start_server, tmp_path):
     )
 
 
+def _decode_process_output(data: bytes | None) -> str:
+    """Текст только для диагностики; ASCII-маркеры проверяются по байтам."""
+    return (data or b"").decode("utf-8", errors="replace")
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="нужен PowerShell/Windows")
 def test_installer_stops_only_target_server(start_server, tmp_path):
     """stop_http_server.ps1 с ExpectedScriptPath останавливает ТОЛЬКО процесс
@@ -295,15 +300,22 @@ def test_installer_stops_only_target_server(start_server, tmp_path):
                 sys.executable,
             ],
             capture_output=True,
-            text=True,
             timeout=90,
             check=False,
         )
+        # PowerShell может писать в UTF-8 при cp1252-локали раннера:
+        # берём байты, маркеры проверяем по ASCII, декодируем только для сообщений
+        stdout = result.stdout or b""
+        stderr = result.stderr or b""
+        stdout_text = _decode_process_output(stdout)
+        stderr_text = _decode_process_output(stderr)
+
         assert result.returncode == 0, (
             f"stop_http_server.ps1 упал: rc={result.returncode}\n"
-            f"stdout={result.stdout[-600:]}\nstderr={result.stderr[-600:]}"
+            f"stdout={stdout_text[-600:]}\nstderr={stderr_text[-600:]}"
         )
-        assert f"PORT_{target_port}_FREE" in result.stdout, result.stdout[-600:]
+        marker = f"PORT_{target_port}_FREE".encode("ascii")
+        assert marker in stdout, stdout_text[-600:]
 
         # целевой процесс завершён
         try:

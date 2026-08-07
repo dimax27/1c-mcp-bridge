@@ -93,6 +93,38 @@ def test_resolve_plaintext_passthrough():
     assert resolve_connection_string(LEGACY_CFG, conn, False) == conn
 
 
+def test_switch_to_windows_auth_drops_credential():
+    """Переход на Windows-аутентификацию (нет Usr) сбрасывает credential —
+    иначе сервер подставил бы расшифрованный пароль без пользователя."""
+    cfg = assemble_db_config(
+        DPAPI_CFG,
+        enabled=True,
+        description="УТ",
+        progid="V83.COMConnector",
+        connection_string="Srvr=192.168.0.35;Ref=ut10",  # без Usr — Windows auth
+        notes="",
+        password_modified=False,
+    )
+    assert "credential" not in cfg
+    assert ";Pwd=" not in cfg["connection_string"]
+
+
+def test_username_change_without_password_does_not_reuse_old_credential():
+    """Смена пользователя без ввода нового пароля не должна переносить старый
+    credential (пароль старого пользователя) к новому имени."""
+    cfg = assemble_db_config(
+        DPAPI_CFG,
+        enabled=True,
+        description="УТ",
+        progid="V83.COMConnector",
+        connection_string='Srvr=192.168.0.35;Ref=ut10;Usr="Новый Пользователь"',
+        notes="",
+        password_modified=False,
+    )
+    assert "credential" not in cfg
+    assert 'Usr="Новый Пользователь"' in cfg["connection_string"]
+
+
 def test_resolve_dpapi_decrypts_password():
     """Реальный DPAPI-круг через migrate_to_encrypted (как при загрузке базы):
     шифруем пароль и проверяем, что resolve_connection_string возвращает

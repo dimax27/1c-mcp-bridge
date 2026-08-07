@@ -95,6 +95,11 @@ def _strip_pwd(conn: str) -> str:
     return _PWD_RE.sub("", conn)
 
 
+def _extract_usr(conn: str) -> str:
+    m = _USR_RE.search(conn or "")
+    return m.group(1) if m else ""
+
+
 def assemble_db_config(
     existing,
     *,
@@ -108,9 +113,11 @@ def assemble_db_config(
 ) -> dict:
     """Собирает конфиг базы из формы.
 
-    Если у существующей базы есть DPAPI-credential, а пользователь не вводил
-    новый пароль — credential сохраняется, а Pwd= из connection_string
-    убирается. Иначе (новый пароль, новая база) — обычная строка с Pwd=.
+    DPAPI-credential сохраняется только если аутентификация не менялась:
+    в строке остался Usr, имя пользователя прежнее и пароль не редактировали.
+    При переходе на Windows-аутентификацию (нет Usr) или смене пользователя
+    старый credential не переносится — иначе сервер подставил бы прежний
+    пароль к новому/отсутствующему пользователю.
     """
     cfg = {
         "enabled": enabled,
@@ -124,8 +131,12 @@ def assemble_db_config(
 
     cred = existing.get("credential") if isinstance(existing, dict) else None
     if cred and not password_modified:
-        cfg["credential"] = cred
-        cfg["connection_string"] = _strip_pwd(connection_string)
+        old_usr = _extract_usr(existing.get("connection_string", ""))
+        new_usr = _extract_usr(connection_string)
+        if old_usr and new_usr and old_usr == new_usr:
+            cfg["credential"] = cred
+            cfg["connection_string"] = _strip_pwd(connection_string)
+        # иначе: Windows-аутентификация или смена пользователя — сбрасываем
     return cfg
 
 
@@ -895,10 +906,12 @@ class ManagerApp(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _restart_bridge_if_running(self) -> bool:
-        """Если HTTP-сервер моста запущен — перезапускаем его (изменения БД
-        подхватываются сразу, без ручного рестарта). Возвращает True, если
-        перезапуск выполнен."""
+        """Если HTTP-сервер моста запущен — перезапускаем его через единый
+        installer/restart_http_server.ps1 (остановка + запуск + MCP health-check).
+        Возвращает True, только если скрипт сообщил RESTART_OK."""
         import socket
+        import subprocess
+
         try:
             with socket.create_connection(("127.0.0.1", 8000), timeout=1):
                 pass
@@ -907,30 +920,22 @@ class ManagerApp(tk.Tk):
             running = False
         if not running:
             return False
-        stop_script = APP_DIR / "installer" / "stop_http_server.ps1"
-        vbs = APP_DIR / "start_1c_bridge_silent.vbs"
-        if not (stop_script.exists() and vbs.exists()):
+        restart_script = APP_DIR / "installer" / "restart_http_server.ps1"
+        if not restart_script.exists():
             return False
-        import subprocess
         try:
             res = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(stop_script)],
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(restart_script)],
                 capture_output=True,
-                timeout=60,
+                timeout=120,
                 check=False,
             )
-            out = (res.stdout or "") + (res.stderr or "")
-            # запускаем новый сервер только если старый действительно остановлен
-            if res.returncode != 0 or "PORT_8000_BUSY" in out or "PORT_8000_FREE" not in out:
-                return False
-            subprocess.Popen(
-                ["wscript.exe", str(vbs)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
         except Exception:
             return False
+        # вывод может быть в UTF-8 при cp1252-локали — декодируем с replace
+        out = (res.stdout or b"") + (res.stderr or b"")
+        text = out.decode("utf-8", errors="replace")
+        return res.returncode == 0 and "RESTART_OK" in text
 
     def _show_test_result(self, ok: bool, msg: str):
         self.btn_test["state"] = "normal"

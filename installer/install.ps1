@@ -75,36 +75,52 @@ function Start-BridgeHttpServer {
         Start-Sleep -Milliseconds 500
     }
     if (-not $listening) {
-        Log "WARNING: HTTP-сервер не поднялся на порту 8000 за 30 с — смотрите журнал $HttpLogFile"
+        Log "ERROR: HTTP-сервер не поднялся на порту 8000 за 30 с — смотрите журнал $HttpLogFile"
         return $false
     }
     Log "HTTP-сервер слушает порт 8000."
 
-    # Настоящий MCP health-check (best-effort): initialize + tools/list
+    # Настоящий MCP health-check: ровно 5 инструментов + list_databases.
+    # Токен передаём переменной окружения — во временный файл он не попадает.
     $hcScript = Join-Path $env:TEMP '1c-bridge-healthcheck.py'
     @"
-import asyncio
+import asyncio, os
 from mcp import Client
-URL = r"http://127.0.0.1:8000/mcp/$HttpToken"
+EXPECTED = {"describe_object", "execute_query", "get_object_by_ref", "list_databases", "list_metadata"}
 async def main():
-    async with Client(URL) as c:
-        t = await c.list_tools()
-        print(len(t.tools))
-asyncio.run(main())
+    t = os.environ["ONEC_HTTP_TOKEN"]
+    async with Client("http://127.0.0.1:8000/mcp/" + t) as c:
+        names = {tool.name for tool in (await c.list_tools()).tools}
+        if not EXPECTED.issubset(names):
+            print("TOOLS_MISSING:", sorted(EXPECTED - names))
+            return 1
+        r = await c.call_tool("list_databases", {})
+        if getattr(r, "is_error", False):
+            print("LIST_DATABASES_ERROR")
+            return 2
+        print("HEALTH_OK")
+        return 0
+raise SystemExit(asyncio.run(main()))
 "@ | Set-Content -Path $hcScript -Encoding UTF8
+    $env:ONEC_HTTP_TOKEN = $HttpToken
+    $healthOk = $false
     try {
-        $count = (& $VenvPython $hcScript 2>&1 | Select-Object -Last 1)
-        if ($count -match '^\d+$') {
-            Log "HTTP health-check OK: tools/list вернул $count инструментов."
-        } else {
-            Log "WARNING: HTTP health-check: $count"
-        }
+        $out = (& $VenvPython $hcScript 2>&1)
+        $code = $LASTEXITCODE
+        $out | ForEach-Object { Log "  health-check: $_" }
+        $healthOk = ($code -eq 0)
     } catch {
-        Log "WARNING: HTTP health-check не удался: $($_.Exception.Message)"
+        Log "ERROR: health-check не выполнился: $($_.Exception.Message)"
     } finally {
         Remove-Item $hcScript -ErrorAction SilentlyContinue
+        Remove-Item Env:\ONEC_HTTP_TOKEN -ErrorAction SilentlyContinue
     }
-    return $true
+    if ($healthOk) {
+        Log "HTTP health-check OK: 5 инструментов + list_databases."
+    } else {
+        Log "ERROR: MCP health-check не пройден."
+    }
+    return $healthOk
 }
 
 # Останавливаем старый HTTP-сервер моста, если он ещё запущен: иначе новый
@@ -685,9 +701,11 @@ if ($ConfiguredClients.Count -gt 0) {
 
 # -----------------------------------------------------------------------------
 # Перезапуск HTTP-сервера после обновления: если он работал до установки —
-# запускаем новый и проверяем его MCP health-check'ом.
+# запускаем новый и требуем успешного MCP health-check'а.
 if ($HttpServerWasRunning) {
-    Start-BridgeHttpServer | Out-Null
+    if (-not (Start-BridgeHttpServer)) {
+        throw "HTTP-сервер перезапущен некорректно: MCP health-check не пройден — смотрите журнал $HttpLogFile"
+    }
 } else {
     Log "HTTP-сервер моста не запущен (до установки он не работал)."
     Log "Запустите ярлык «1C Bridge (HTTP-сервер)» из меню Пуск, когда понадобится."
