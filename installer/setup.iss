@@ -728,6 +728,13 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = PageConnectionParams.ID then
     UpdateConnectionFieldsVisibility;
+
+  // На странице приветствия — подсказка про режимы ChatGPT Desktop
+  if CurPageID = wpWelcome then
+    WizardForm.WelcomeLabel2.Caption := WizardForm.WelcomeLabel2.Caption +
+      #13#10#13#10 +
+      'Для ChatGPT Desktop: после установки откройте НОВЫЙ разговор в режиме' +
+      ' Work или Codex. Обычный Chat локальные MCP-инструменты не использует.'
 end;
 
 function ValidateDbKey(const Key: String): Boolean;
