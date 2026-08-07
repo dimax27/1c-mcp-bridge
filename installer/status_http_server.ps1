@@ -17,12 +17,19 @@ $ErrorActionPreference = 'Continue'
 
 Write-Host "=== Статус 1C MCP Bridge (HTTP-сервер) ===" -ForegroundColor Cyan
 
-# 1) Процесс моста
+# 1) Процесс моста (venv-python — лаунчер-редиректор, базовый python — рабочий)
+$portOwner = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty OwningProcess
 $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -and $_.CommandLine -match 'mcp_server_1c_http\.py' }
+    Where-Object {
+        $_.ProcessId -ne $PID -and
+        $_.CommandLine -and $_.CommandLine -match 'mcp_server_1c_http\.py'
+    }
 if ($procs) {
     foreach ($p in $procs) {
-        Write-Host ("Процесс: PID {0} (запущен {1})" -f $p.ProcessId, $p.CreationDate)
+        $role = if ($p.ProcessId -eq $portOwner) { 'рабочий (слушает порт)' } else { 'лаунчер' }
+        $exe = Split-Path $p.ExecutablePath -Leaf -ErrorAction SilentlyContinue
+        Write-Host ("Процесс: PID {0} [{1}] ({2}, запущен {3})" -f $p.ProcessId, $role, $exe, $p.CreationDate)
     }
 } else {
     Write-Host "Процесс: НЕ запущен" -ForegroundColor Yellow
@@ -54,7 +61,8 @@ if (Test-Path $tokenFile) {
 # 4) Конфиг ChatGPT/Codex
 $cfg = Join-Path $env:USERPROFILE '.codex\config.toml'
 if (Test-Path $cfg) {
-    $text = Get-Content -LiteralPath $cfg -Raw -ErrorAction SilentlyContinue
+    # config.toml в UTF-8 без BOM — читаем явно в UTF-8 (PS 5.1 по умолчанию ANSI)
+    $text = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     if ($text -match '\[mcp_servers\.1c-bridge\]' -and $text -match '/mcp/') {
         Write-Host "ChatGPT/Codex config: секция 1c-bridge есть" -ForegroundColor Green
         Write-Host "STATUS_CODEX_CONFIG=PRESENT"
@@ -67,11 +75,11 @@ if (Test-Path $cfg) {
     Write-Host "STATUS_CODEX_CONFIG=MISSING"
 }
 
-# 5) Последние строки журнала
+# 5) Последние строки журнала (журнал пишется в UTF-8 — читаем явно в UTF-8)
 $logFile = Join-Path $env:ProgramData '1cMcpBridge\http-server.log'
 if (Test-Path $logFile) {
     Write-Host "`n--- Последние строки http-server.log ---"
-    Get-Content -LiteralPath $logFile -Tail 4 -ErrorAction SilentlyContinue |
+    Get-Content -LiteralPath $logFile -Tail 4 -Encoding UTF8 -ErrorAction SilentlyContinue |
         ForEach-Object {
             $_ -replace '/mcp/[A-Za-z0-9_-]{12,}', '/mcp/<token>' `
                -replace 'Pwd="[^"]*"', 'Pwd="***"'
