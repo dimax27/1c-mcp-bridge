@@ -84,37 +84,24 @@ if (-not $token) {
 }
 
 $env:ONEC_HTTP_TOKEN = $token
-# ВАЖНО: не передаём код через -c — PowerShell съедает кавычки в аргументе
-# нативного процесса (Client("...") -> Client(...) -> SyntaxError). Пишем
-# во временный .py (токен — только в переменной окружения).
-$hcScript = Join-Path $env:TEMP '1c-bridge-restart-healthcheck.py'
-@"
-import asyncio, os
-from mcp import Client
-async def main():
-    t = os.environ["ONEC_HTTP_TOKEN"]
-    async with Client("http://127.0.0.1:8000/mcp/" + t) as c:
-        tools = await c.list_tools()
-        print(len(tools.tools))
-asyncio.run(main())
-"@ | Set-Content -Path $hcScript -Encoding UTF8
-$count = $null
+# Единый MCP health-check (src/healthcheck.py): ровно 5 инструментов +
+# list_databases. Токен — только в переменной окружения.
+$hcLine = $null
 try {
-    $count = [string](& $VenvPython $hcScript 2>&1 | Select-Object -Last 1)
-    if ($LASTEXITCODE -ne 0) { $count = $null }
+    $hcLine = [string](& $VenvPython (Join-Path $AppDir 'healthcheck.py') 2>&1 | Select-Object -Last 1)
+    if ($LASTEXITCODE -ne 0) { $hcLine = $null }
 } finally {
-    Remove-Item $hcScript -ErrorAction SilentlyContinue
     Remove-Item Env:\ONEC_HTTP_TOKEN -ErrorAction SilentlyContinue
 }
 
-if ($null -eq $count -or $count -notmatch '^\d+$') {
-    Write-Host "ОШИБКА: MCP health-check не прошёл (tools/list). Смотрите журнал сервера." -ForegroundColor Red
+if ($null -eq $hcLine -or $hcLine -notlike 'HEALTH_OK*') {
+    Write-Host "ОШИБКА: MCP health-check не прошёл ($hcLine). Смотрите журнал сервера." -ForegroundColor Red
     Write-Host "RESTART_FAIL"
     if ($Interactive) { Read-Host "`nНажмите Enter для закрытия..." }
     exit 1
 }
 
-Write-Host "OK: HTTP-сервер работает (PID $($listener.OwningProcess), порт 8000, tools/list = $count)." -ForegroundColor Green
+Write-Host "OK: HTTP-сервер работает (PID $($listener.OwningProcess), порт 8000, $hcLine)." -ForegroundColor Green
 Write-Host "RESTART_OK"
 if ($Interactive) { Read-Host "`nНажмите Enter для закрытия..." }
 exit 0

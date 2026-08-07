@@ -80,39 +80,18 @@ function Start-BridgeHttpServer {
     }
     Log "HTTP-сервер слушает порт 8000."
 
-    # Настоящий MCP health-check: ровно 5 инструментов + list_databases.
-    # Токен передаём переменной окружения — во временный файл он не попадает.
-    $hcScript = Join-Path $env:TEMP '1c-bridge-healthcheck.py'
-    @"
-import asyncio, os
-from mcp import Client
-EXPECTED = {"describe_object", "execute_query", "get_object_by_ref", "list_databases", "list_metadata"}
-async def main():
-    t = os.environ["ONEC_HTTP_TOKEN"]
-    async with Client("http://127.0.0.1:8000/mcp/" + t) as c:
-        names = {tool.name for tool in (await c.list_tools()).tools}
-        if not EXPECTED.issubset(names):
-            print("TOOLS_MISSING:", sorted(EXPECTED - names))
-            return 1
-        r = await c.call_tool("list_databases", {})
-        if getattr(r, "is_error", False):
-            print("LIST_DATABASES_ERROR")
-            return 2
-        print("HEALTH_OK")
-        return 0
-raise SystemExit(asyncio.run(main()))
-"@ | Set-Content -Path $hcScript -Encoding UTF8
+    # Настоящий MCP health-check (единый скрипт healthcheck.py): ровно 5
+    # инструментов + list_databases. Токен — только в переменной окружения.
     $env:ONEC_HTTP_TOKEN = $HttpToken
     $healthOk = $false
     try {
-        $out = (& $VenvPython $hcScript 2>&1)
+        $out = (& $VenvPython (Join-Path $AppDir 'healthcheck.py') 2>&1)
         $code = $LASTEXITCODE
         $out | ForEach-Object { Log "  health-check: $_" }
         $healthOk = ($code -eq 0)
     } catch {
         Log "ERROR: health-check не выполнился: $($_.Exception.Message)"
     } finally {
-        Remove-Item $hcScript -ErrorAction SilentlyContinue
         Remove-Item Env:\ONEC_HTTP_TOKEN -ErrorAction SilentlyContinue
     }
     if ($healthOk) {

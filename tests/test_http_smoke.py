@@ -252,6 +252,37 @@ def _decode_process_output(data: bytes | None) -> str:
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="нужен PowerShell/Windows")
+def test_shared_healthcheck_script(start_server):
+    """src/healthcheck.py — единая проверка (5 инструментов + list_databases):
+    успех с верным токеном, отказ с неверным."""
+    ctx = start_server()
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = _TOKEN
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    ok = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    assert ok.returncode == 0, f"healthcheck упал: {ok.stdout[-400:]}\n{ok.stderr[-400:]}"
+    assert "HEALTH_OK" in ok.stdout, ok.stdout[-400:]
+
+    env["ONEC_HTTP_TOKEN"] = "WRONGTOKEN"
+    bad = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    assert bad.returncode != 0, "healthcheck с неверным токеном не должен проходить"
+
+
 def test_installer_stops_only_target_server(start_server, tmp_path):
     """stop_http_server.ps1 с ExpectedScriptPath останавливает ТОЛЬКО процесс
     этой установки.

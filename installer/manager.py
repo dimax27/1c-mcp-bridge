@@ -141,13 +141,18 @@ def assemble_db_config(
 
 
 def resolve_connection_string(existing, connection_string, password_modified) -> str:
-    """Строка для test_connection: расшифровывает DPAPI, если пароль не меняли."""
+    """Строка для test_connection: расшифровывает DPAPI, только если пароль
+    не меняли И аутентификация не менялась (тот же Usr — как в
+    assemble_db_config). Иначе строка берётся как есть, без старого пароля."""
     cred = existing.get("credential") if isinstance(existing, dict) else None
     if cred and not password_modified:
-        from credentials import build_conn_str
-        db_cfg = dict(existing)
-        db_cfg["connection_string"] = _strip_pwd(connection_string)
-        return build_conn_str(db_cfg)
+        old_usr = _extract_usr(existing.get("connection_string", ""))
+        new_usr = _extract_usr(connection_string)
+        if old_usr and new_usr and old_usr == new_usr:
+            from credentials import build_conn_str
+            db_cfg = dict(existing)
+            db_cfg["connection_string"] = _strip_pwd(connection_string)
+            return build_conn_str(db_cfg)
     return connection_string
 
 

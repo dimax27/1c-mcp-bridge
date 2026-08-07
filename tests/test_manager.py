@@ -125,6 +125,14 @@ def test_username_change_without_password_does_not_reuse_old_credential():
     assert 'Usr="Новый Пользователь"' in cfg["connection_string"]
 
 
+def test_resolve_username_change_does_not_use_old_password():
+    """Смена пользователя: resolve_connection_string НЕ подставляет пароль
+    старого пользователя (возвращает строку как есть)."""
+    conn = 'Srvr=1.2.3.4;Ref=x;Usr="Новый Пользователь"'
+    resolved = resolve_connection_string(DPAPI_CFG, conn, False)
+    assert resolved == conn
+
+
 def test_resolve_dpapi_decrypts_password():
     """Реальный DPAPI-круг через migrate_to_encrypted (как при загрузке базы):
     шифруем пароль и проверяем, что resolve_connection_string возвращает
