@@ -85,6 +85,28 @@ def main() -> int:
     # Random path prefix if token is set (defense-in-depth for localhost).
     # Сам токен в лог не выводим — он является частью URL MCP.
     token = os.environ.get("ONEC_HTTP_TOKEN", "").strip()
+    if not token:
+        # VBS-лаунчер и Планировщик задают переменную; fallback для прямого
+        # запуска (python mcp_server_1c_http.py) — читаем из стандартного
+        # файла токена (путь можно переопределить через ONEC_HTTP_TOKEN_FILE).
+        token_file = os.environ.get(
+            "ONEC_HTTP_TOKEN_FILE",
+            os.path.join(
+                os.environ.get("ProgramData", "C:\\ProgramData"),
+                "1cMcpBridge",
+                ".http_token",
+            ),
+        )
+        try:
+            with open(token_file, encoding="utf-8") as fh:
+                token = fh.read().strip()
+        except OSError:
+            pass
+    if not token:
+        log.warning(
+            "ONEC_HTTP_TOKEN не задан и файл токена не найден — "
+            "сервер запущен БЕЗ секретного пути (/mcp отвечает 404)!"
+        )
     path_prefix = f"/mcp/{token}" if token else "/mcp"
 
     if token:

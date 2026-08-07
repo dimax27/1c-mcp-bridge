@@ -73,6 +73,8 @@ def start_server(tmp_path):
         occupy_port: bool = False,
         port: int | None = None,
         databases: dict | None = None,
+        extra_env: dict | None = None,
+        token: str | None = _TOKEN,
     ) -> dict:
         if databases is None:
             databases = {
@@ -107,7 +109,10 @@ def start_server(tmp_path):
 
         env = dict(os.environ)
         env["ONEC_DATABASES_FILE"] = str(db)
-        env["ONEC_HTTP_TOKEN"] = _TOKEN
+        if token is not None:
+            env["ONEC_HTTP_TOKEN"] = token
+        if extra_env:
+            env.update(extra_env)
 
         cmd = [sys.executable, str(SERVER), "--port", str(port)]
         if log_file is not None:
@@ -127,7 +132,7 @@ def start_server(tmp_path):
             "proc": proc,
             "port": port,
             "script": str(SERVER),
-            "token_url": f"http://127.0.0.1:{port}/mcp/{_TOKEN}",
+            "token_url": f"http://127.0.0.1:{port}/mcp/{env.get('ONEC_HTTP_TOKEN', _TOKEN)}",
             "plain_url": f"http://127.0.0.1:{port}/mcp",
             "log_file": log_file,
         }
@@ -193,6 +198,25 @@ def test_http_smoke_token_path(start_server):
     assert not getattr(call, "is_error", False), "list_databases вернул ошибку"
     payload = json.loads(_call_tool_text(call))
     assert "smoke" in payload.get("databases", {}), f"нет базы smoke: {payload}"
+
+
+def test_token_fallback_from_file(start_server, tmp_path):
+    """Если ONEC_HTTP_TOKEN не задан, сервер читает токен из файла."""
+    token_file = tmp_path / ".http_token"
+    fallback_token = "FALLBACK99"
+    token_file.write_text(fallback_token, encoding="utf-8")
+
+    ctx = start_server(
+        extra_env={"ONEC_HTTP_TOKEN_FILE": str(token_file)},
+        token=None,  # не задаём токен через env — сервер сам прочитает файл
+    )
+    url = f"http://127.0.0.1:{ctx['port']}/mcp/{fallback_token}"
+    names, annotations, _ = _probe_tools(url)
+    assert "list_databases" in names, f"tools/list: {names}"
+    # /mcp без токена — всё ещё 404 (защита на месте)
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(ctx["plain_url"], timeout=10)
+    assert excinfo.value.code == 404
 
 
 def test_http_smoke_plain_path_rejected(start_server):
@@ -444,6 +468,13 @@ def test_installer_stops_only_target_server(start_server, tmp_path):
     decoy_script.write_text("import time; time.sleep(120)\n", encoding="utf-8")
     decoy = subprocess.Popen([sys.executable, str(decoy_script)], cwd=str(decoy_dir))
 
+    # второй decoy: имя БЕЗ _http — проверяем, что улучшенный regex ловит оба варианта
+    decoy_no_http = decoy_dir / "mcp_server_1c.py"
+    decoy_no_http.write_text("import time; time.sleep(120)\n", encoding="utf-8")
+    decoy2 = subprocess.Popen(
+        [sys.executable, str(decoy_no_http)], cwd=str(decoy_dir)
+    )
+
     # посторонний процесс на другом порту (не мост)
     foreign = subprocess.Popen(
         [sys.executable, "-m", "http.server", str(other_port), "--bind", "127.0.0.1"],
@@ -498,11 +529,14 @@ def test_installer_stops_only_target_server(start_server, tmp_path):
         assert decoy.poll() is None, (
             "decoy-процесс (тот же скрипт из другого каталога) не должен останавливаться"
         )
+        assert decoy2.poll() is None, (
+            "decoy2 (mcp_server_1c.py из другого каталога) не должен останавливаться"
+        )
         assert foreign.poll() is None, (
             "посторонний процесс на другом порту не должен останавливаться"
         )
     finally:
-        for p in (decoy, foreign):
+        for p in (decoy, decoy2, foreign):
             p.kill()
             try:
                 p.wait(timeout=5)

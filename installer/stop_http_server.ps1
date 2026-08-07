@@ -7,7 +7,7 @@
 #  установки/удаления.
 #
 #  Безопасность остановки: по умолчанию (без параметров) останавливаются
-#  ВСЕ процессы с mcp_server_1c_http.py в командной строке — для удаления
+#  ВСЕ процессы с mcp_server_1c_http.py ИЛИ mcp_server_1c.py в командной строке — для удаления
 #  это правильно. При установке передавайте ExpectedScriptPath /
 #  ExpectedPythonPath: тогда остановится ТОЛЬКО процесс этой установки,
 #  а посторонние экземпляры (тестовые, другой каталог) не пострадают.
@@ -48,7 +48,7 @@ function Stop-BridgeHttpServer {
         $bridgeProcs = Get-CimInstance Win32_Process -ErrorAction Stop |
             Where-Object {
                 $_.ProcessId -ne $PID -and
-                $_.CommandLine -and $_.CommandLine -match 'mcp_server_1c_http\.py'
+                $_.CommandLine -and $_.CommandLine -match 'mcp_server_1c(?:_http)?\.py'
             }
 
         if ($ExpectedScriptPath) {
@@ -82,7 +82,7 @@ function Stop-BridgeHttpServer {
                     -ErrorAction SilentlyContinue
                 if (-not $owner) { return }
                 $isBridge = $owner.CommandLine -and `
-                    $owner.CommandLine -match 'mcp_server_1c_http\.py' -and `
+                    $owner.CommandLine -match 'mcp_server_1c(?:_http)?\.py' -and `
                     $owner.ProcessId -ne $PID
                 if ($ExpectedScriptPath) {
                     $isBridge = $isBridge -and `
