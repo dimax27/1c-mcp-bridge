@@ -15,6 +15,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Версия обязана быть семвером (например 1.2.3 или 1.2.3-beta.1): она
+# подставляется в src/version.py и в имя установщика.
+if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
+    throw "Некорректная версия: '$Version' (ожидается x.y.z или x.y.z-метка)"
+}
+
 $installerDir = $PSScriptRoot
 $root = Split-Path $PSScriptRoot -Parent
 $versionFile = Join-Path $root 'src\version.py'
@@ -24,14 +30,23 @@ if (-not (Test-Path $versionFile)) {
 }
 
 $original = [System.IO.File]::ReadAllText($versionFile)
+$oldAppVersion = $env:APP_VERSION
+# экранируем одинарные кавычки перед вставкой в Python-исходник
+$safeVersion = $Version -replace "'", "''"
 
 try {
     Write-Host "Запекаю версию $Version в src/version.py ..."
     [System.IO.File]::WriteAllText(
         $versionFile,
-        "VERSION = '$Version'`n",
+        "VERSION = '$safeVersion'`n",
         [System.Text.UTF8Encoding]::new($false)
     )
+
+    # быстрая проверка, что сгенерированный файл компилируется
+    & python -m py_compile $versionFile
+    if ($LASTEXITCODE -ne 0) {
+        throw "src/version.py не компилируется после запекания версии"
+    }
 
     $env:APP_VERSION = $Version
 
@@ -54,7 +69,11 @@ finally {
         $original,
         [System.Text.UTF8Encoding]::new($false)
     )
-    Remove-Item Env:\APP_VERSION -ErrorAction SilentlyContinue
+    if ($null -eq $oldAppVersion) {
+        Remove-Item Env:\APP_VERSION -ErrorAction SilentlyContinue
+    } else {
+        $env:APP_VERSION = $oldAppVersion
+    }
 }
 
 $distDir = Join-Path $root 'dist'

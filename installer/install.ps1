@@ -680,21 +680,29 @@ if ($ConfiguredClients.Count -gt 0) {
 
 # -----------------------------------------------------------------------------
 # Автозапуск HTTP-сервера при входе в систему (Планировщик заданий).
-# Best-effort: если задачу создать не удалось — не прерываем установку.
+# Задача привязывается к ИНТЕРАКТИВНОМУ пользователю (даже при установке
+# из-под другой административной учётной записи): DPAPI-пароли баз и
+# ChatGPT Desktop работают в контексте вошедшего пользователя.
+# Всегда перерегистрируем с -Force: каталог установки/пользователь могли
+# измениться. Best-effort: неудача не прерывает установку.
 $TaskName = '1C MCP Bridge HTTP'
 try {
-    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($existingTask) {
-        Log "Планировщик: задача '$TaskName' уже существует"
-    } else {
-        $vbs = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
-        $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument "`"$vbs`""
-        $trigger = New-ScheduledTaskTrigger -AtLogOn
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
-        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-            -Settings $settings -RunLevel Limited -Force -Description "1C MCP Bridge HTTP server (autostart at logon)" | Out-Null
-        Log "Планировщик: задача '$TaskName' создана (автозапуск при входе)"
-    }
+    $targetUser = $null
+    try {
+        # текущий интерактивный пользователь (DOMAIN\user)
+        $targetUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
+    } catch { }
+    if (-not $targetUser) { $targetUser = "$env:USERDOMAIN\$env:USERNAME" }
+
+    $vbs = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
+    $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument "`"$vbs`""
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $targetUser
+    $principal = New-ScheduledTaskPrincipal -UserId $targetUser -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+    $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal `
+        -Settings $settings -Description "1C MCP Bridge HTTP server (autostart at logon)"
+    Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
+    Log "Планировщик: задача '$TaskName' создана/обновлена для пользователя $targetUser"
 } catch {
     Log "WARNING: не удалось создать задачу Планировщика '$TaskName': $($_.Exception.Message)"
 }

@@ -8,7 +8,75 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from healthcheck import check_databases_payload, redact_secrets
+from healthcheck import (
+    _probe_com,
+    check_databases_payload,
+    redact_secrets,
+)
+
+
+class _FakeResult:
+    is_error = False
+
+    def __init__(self, text):
+        self.content = [type("_C", (), {"text": text})()]
+
+
+class _FakeClient:
+    """call_tool возвращает текст ответа либо бросает исключение."""
+
+    def __init__(self, text=None, exc=None):
+        self._text = text
+        self._exc = exc
+
+    async def call_tool(self, *args, **kwargs):
+        if self._exc is not None:
+            raise self._exc
+        return _FakeResult(self._text)
+
+
+def test_com_error_detail_redacts_secrets():
+    """HEALTH_COM_DETAIL для error-ответа: токен и Pwd вырезаются."""
+    import asyncio
+    import contextlib
+    import io
+    import json
+
+    err_text = 'Ошибка: Pwd="secret"; URL=/mcp/FAKETOKEN123'
+    client = _FakeClient(text=json.dumps({"error": err_text}, ensure_ascii=False))
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        failures = asyncio.run(_probe_com(client, ["buh"], "FAKETOKEN123"))
+    out = stderr.getvalue()
+    assert failures == ["buh"]
+    assert "FAKETOKEN123" not in out
+    assert "secret" not in out
+    assert "/mcp/<token>" in out
+    # ascii_json экранирует кавычки внутри JSON-строки
+    assert 'Pwd=\\"***\\"' in out
+
+
+def test_com_debug_traceback_redacts_secrets(monkeypatch):
+    """Debug-traceback COM-пробы (ONEC_HEALTHCHECK_DEBUG=1) редактируется."""
+    import asyncio
+    import contextlib
+    import io
+
+    monkeypatch.setenv("ONEC_HEALTHCHECK_DEBUG", "1")
+
+    class Boom(Exception):
+        pass
+
+    client = _FakeClient(
+        exc=Boom('connect url http://127.0.0.1:8000/mcp/FAKETOKEN123')
+    )
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        asyncio.run(_probe_com(client, ["buh"], "FAKETOKEN123"))
+    out = stderr.getvalue()
+    assert "FAKETOKEN123" not in out
+    assert "/mcp/<token>" in out
+    assert "HEALTH_COM_DETAIL" in out
 
 
 def test_redact_secrets():

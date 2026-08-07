@@ -57,8 +57,12 @@ def ascii_json(value) -> str:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
 
 
-async def _probe_com(client, databases: list[str]) -> list[str]:
-    """Проверяет COM/метаданные каждой базы. Возвращает список неудач."""
+async def _probe_com(client, databases: list[str], token: str) -> list[str]:
+    """Проверяет COM/метаданные каждой базы. Возвращает список неудач.
+
+    Все диагностические ветки (краткая причина error-ответа и debug-traceback)
+    проходят через redact_secrets — токен/пароль не попадают даже в stderr.
+    """
     failures: list[str] = []
     for db in databases:
         try:
@@ -79,8 +83,6 @@ async def _probe_com(client, databases: list[str]) -> list[str]:
             )
         except Exception as exc:  # noqa: BLE001 — любая ошибка = провал пробы
             ok = False
-            # краткая причина — в stderr (санитизирована); полный traceback —
-            # только при ONEC_HEALTHCHECK_DEBUG=1
             print(
                 "HEALTH_COM_DETAIL"
                 f" database={ascii_json(db)}"
@@ -88,16 +90,20 @@ async def _probe_com(client, databases: list[str]) -> list[str]:
                 file=sys.stderr,
             )
             if os.environ.get("ONEC_HEALTHCHECK_DEBUG") == "1":
-                traceback.print_exception(exc, file=sys.stderr)
+                details = "".join(
+                    traceback.format_exception(type(exc), exc, exc.__traceback__)
+                )
+                print(redact_secrets(details, token), file=sys.stderr, end="")
         else:
             # сервер вернул ошибку внутри результата (например «Ошибка 1С: ...»)
-            # — причина тоже уходит в stderr (санитизированная)
+            # — причина в stderr, но тоже через redact_secrets
             error_text = payload.get("error")
             if not ok and error_text:
+                safe_error = redact_secrets(str(error_text)[:200], token)
                 print(
                     "HEALTH_COM_DETAIL"
                     f" database={ascii_json(db)}"
-                    f" error={ascii_json(str(error_text)[:200])}",
+                    f" error={ascii_json(safe_error)}",
                     file=sys.stderr,
                 )
         print(f"HEALTH_COM database={ascii_json(db)} status={'OK' if ok else 'FAIL'}")
@@ -173,7 +179,7 @@ async def run(args) -> int:
                         + ascii_json(args.database)
                     )
                     return 3
-                failures = await _probe_com(client, selected)
+                failures = await _probe_com(client, selected, token)
                 if failures:
                     print(
                         "HEALTH_COM_FAIL databases="
