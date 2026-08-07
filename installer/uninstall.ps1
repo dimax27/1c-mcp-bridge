@@ -32,6 +32,14 @@ if (Test-Path $StopServerScript) {
     }
 }
 
+# Удаляем задачу автозапуска (создаётся установщиком при входе в систему)
+try {
+    Unregister-ScheduledTask -TaskName '1C MCP Bridge HTTP' -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "Удалена задача Планировщика '1C MCP Bridge HTTP' (если была)."
+} catch {
+    Write-Host "Не удалось удалить задачу Планировщика: $($_.Exception.Message)"
+}
+
 # --- ChatGPT Desktop (OpenAI Codex): config.toml лежит в профиле пользователя.
 #     Обрабатываем до любых ранних выходов: на машине только с ChatGPT
 #     деинсталлятор обязан удалить секцию 1c-bridge. ---

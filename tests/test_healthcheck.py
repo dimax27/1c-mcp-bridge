@@ -8,7 +8,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from healthcheck import check_databases_payload
+from healthcheck import check_databases_payload, redact_secrets
+
+
+def test_redact_secrets():
+    """Редокция: прямой токен, любой /mcp/<token>, Pwd="..."."""
+    secret = "SECRETTOKEN"
+    text = (
+        f"http://127.0.0.1:8000/mcp/{secret} "
+        'Pwd="секрет1" Pwd = "x"'
+    )
+    redacted = redact_secrets(text, secret)
+    assert secret not in redacted
+    assert "/mcp/<token>" in redacted
+    assert 'Pwd="***"' in redacted
+    # любой токен в /mcp/<...> редактируется даже без прямого вхождения
+    other = redact_secrets("url /mcp/OtherToken123 x", "NOT_IT")
+    assert other == "url /mcp/<token> x"
+
+
+def test_payload_not_object():
+    """Ответ list_databases не является объектом (null/[]/строка/число)."""
+    for bad in (None, [], "text", 42):
+        code, marker, databases = check_databases_payload(bad)
+        assert code == 2
+        assert marker == "HEALTH_DATABASES_INVALID"
+        assert databases == []
 
 
 def test_payload_ok():

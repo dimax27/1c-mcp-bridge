@@ -307,8 +307,30 @@ def test_shared_healthcheck_com_probe_fails_on_unreachable_db(start_server):
     assert res.returncode == 3, f"ожидался код 3: rc={res.returncode}\n{res.stdout[-600:]}"
     assert 'HEALTH_COM database="smoke" status=FAIL' in res.stdout, res.stdout[-600:]
     assert 'HEALTH_COM_FAIL databases=["smoke"]' in res.stdout, res.stdout[-600:]
+    # краткая причина COM-ошибки — в stderr (санитизированная)
+    assert "HEALTH_COM_DETAIL" in res.stderr, res.stderr[-600:]
     # вывод — только ASCII (имена/ошибки экранируются)
     res.stdout.encode("ascii")  # не должно упасть с UnicodeEncodeError
+
+
+def test_healthcheck_redacts_token_from_traceback(start_server):
+    """Traceback при HTTP-ошибке (404) не должен содержать токен."""
+    ctx = start_server()
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = "WRONGTOKEN"  # 404 -> traceback с URL и токеном
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    res = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env,
+    )
+    combined = res.stdout + res.stderr
+    assert "WRONGTOKEN" not in combined, "токен утёк в вывод healthcheck"
+    assert res.returncode != 0
 
 
 def test_healthcheck_cyrillic_db_key_ascii(start_server):

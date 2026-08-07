@@ -67,15 +67,6 @@ jobs:
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Building version: $v"
 
-      # Запекаем версию в src/version.py: после установки APP_VERSION уже нет,
-      # и сервер должен показывать версию установщика, а не дефолтную.
-      - name: Bake version into src/version.py
-        shell: pwsh
-        run: |
-          $v = "${{ steps.ver.outputs.version }}"
-          "VERSION = '$v'" | Set-Content -Path src/version.py -Encoding UTF8
-          Get-Content src/version.py | Select-Object -Last 1
-
       - name: Install Inno Setup
         shell: pwsh
         run: |
@@ -95,13 +86,12 @@ jobs:
           Write-Host "ISCC: $iscc"
           "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Build installer
+      # build.ps1 запекает версию в src/version.py, собирает установщик и
+      # восстанавливает исходный файл (локально и в CI — один путь).
+      - name: Build installer (build.ps1)
         shell: pwsh
-        env:
-          APP_VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          & $env:ISCC /Qp installer/setup.iss
+          & .\installer\build.ps1 -Version "${{ steps.ver.outputs.version }}"
           Get-ChildItem dist
 
       - name: Upload artifact

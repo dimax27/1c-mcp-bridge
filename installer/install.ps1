@@ -679,6 +679,27 @@ if ($ConfiguredClients.Count -gt 0) {
 }
 
 # -----------------------------------------------------------------------------
+# Автозапуск HTTP-сервера при входе в систему (Планировщик заданий).
+# Best-effort: если задачу создать не удалось — не прерываем установку.
+$TaskName = '1C MCP Bridge HTTP'
+try {
+    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existingTask) {
+        Log "Планировщик: задача '$TaskName' уже существует"
+    } else {
+        $vbs = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
+        $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument "`"$vbs`""
+        $trigger = New-ScheduledTaskTrigger -AtLogOn
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+            -Settings $settings -RunLevel Limited -Force -Description "1C MCP Bridge HTTP server (autostart at logon)" | Out-Null
+        Log "Планировщик: задача '$TaskName' создана (автозапуск при входе)"
+    }
+} catch {
+    Log "WARNING: не удалось создать задачу Планировщика '$TaskName': $($_.Exception.Message)"
+}
+
+# -----------------------------------------------------------------------------
 # Перезапуск HTTP-сервера после обновления: если он работал до установки —
 # запускаем новый и требуем успешного MCP health-check'а.
 if ($HttpServerWasRunning) {

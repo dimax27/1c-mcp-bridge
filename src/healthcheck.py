@@ -26,6 +26,8 @@ import argparse
 import asyncio
 import json
 import os
+import re
+import sys
 import traceback
 
 EXPECTED_TOOLS = {
@@ -75,20 +77,53 @@ async def _probe_com(client, databases: list[str]) -> list[str]:
                 and not payload.get("error")
                 and payload.get("type") == METADATA_DIRECTORIES
             )
-        except Exception:  # noqa: BLE001 — любая ошибка = провал пробы
+        except Exception as exc:  # noqa: BLE001 — любая ошибка = провал пробы
             ok = False
+            # краткая причина — в stderr (санитизирована); полный traceback —
+            # только при ONEC_HEALTHCHECK_DEBUG=1
+            print(
+                "HEALTH_COM_DETAIL"
+                f" database={ascii_json(db)}"
+                f" error={ascii_json(type(exc).__name__)}",
+                file=sys.stderr,
+            )
+            if os.environ.get("ONEC_HEALTHCHECK_DEBUG") == "1":
+                traceback.print_exception(exc, file=sys.stderr)
+        else:
+            # сервер вернул ошибку внутри результата (например «Ошибка 1С: ...»)
+            # — причина тоже уходит в stderr (санитизированная)
+            error_text = payload.get("error")
+            if not ok and error_text:
+                print(
+                    "HEALTH_COM_DETAIL"
+                    f" database={ascii_json(db)}"
+                    f" error={ascii_json(str(error_text)[:200])}",
+                    file=sys.stderr,
+                )
         print(f"HEALTH_COM database={ascii_json(db)} status={'OK' if ok else 'FAIL'}")
         if not ok:
             failures.append(db)
     return failures
 
 
-def check_databases_payload(payload: dict) -> tuple[int, str, list[str]]:
+def redact_secrets(text: str, token: str) -> str:
+    """Убирает секреты из текста диагностики: HTTP-токен (прямое вхождение
+    и любой /mcp/<token>) и пароли Pwd=\"...\"."""
+    if token:
+        text = text.replace(token, "<token>")
+    text = re.sub(r"/mcp/[A-Za-z0-9_-]+", "/mcp/<token>", text)
+    text = re.sub(r'Pwd\s*=\s*"[^"]*"', 'Pwd="***"', text, flags=re.IGNORECASE)
+    return text
+
+
+def check_databases_payload(payload: object) -> tuple[int, str, list[str]]:
     """Валидация ответа list_databases.
 
     Возвращает (код, маркер, список ключей баз): 0 — всё корректно;
-    2 — список баз пуст/не является объектом/нет default_database.
+    2 — ответ не объект / список баз пуст / нет default_database.
     """
+    if not isinstance(payload, dict):
+        return 2, "HEALTH_DATABASES_INVALID", []
     databases_payload = payload.get("databases")
     if not isinstance(databases_payload, dict):
         return 2, "HEALTH_DATABASES_INVALID", []
@@ -151,10 +186,13 @@ async def run(args) -> int:
             print(f"HEALTH_OK tools={len(names)} databases={len(databases)}")
             return 0
     except Exception as exc:  # noqa: BLE001 — причина ошибки выводится в консоль
-        # stdout остаётся ASCII-маркером; полные детали (в т.ч. внутренние
-        # ошибки, а не только сетевое подключение) — в stderr
-        print("HEALTH_CONNECT_ERROR:", type(exc).__name__)
-        traceback.print_exception(exc)
+        # stdout остаётся ASCII-маркером; детали — в stderr, но с редакцией
+        # секретов: traceback может содержать URL с токеном (/mcp/<token>)
+        print("HEALTH_RUNTIME_ERROR:", type(exc).__name__)
+        details = "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        )
+        print(redact_secrets(details, token), file=sys.stderr, end="")
         return 1
 
 
