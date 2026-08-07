@@ -283,6 +283,30 @@ def test_shared_healthcheck_script(start_server):
     assert bad.returncode != 0, "healthcheck с неверным токеном не должен проходить"
 
 
+def test_shared_healthcheck_com_probe_fails_on_unreachable_db(start_server):
+    """healthcheck.py --com: для недоступной базы (smoke без 1С) COM-проба
+    честно падает с кодом 3, вывод — ASCII."""
+    ctx = start_server()
+    env = dict(os.environ)
+    env["ONEC_HTTP_TOKEN"] = _TOKEN
+    env["ONEC_HTTP_PORT"] = str(ctx["port"])
+
+    res = subprocess.run(
+        [sys.executable, str(REPO / "src" / "healthcheck.py"), "--com"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env=env,
+    )
+    # сервер MCP отвечает, но база 'smoke' не подключается к 1С -> код 3
+    assert res.returncode == 3, f"ожидался код 3: rc={res.returncode}\n{res.stdout[-600:]}"
+    assert "HEALTH_COM smoke FAIL" in res.stdout, res.stdout[-600:]
+    assert "HEALTH_COM_FAIL: smoke" in res.stdout, res.stdout[-600:]
+    # вывод — только ASCII (имена/ошибки экранируются)
+    res.stdout.encode("ascii")  # не должно упасть с UnicodeEncodeError
+
+
 def test_installer_stops_only_target_server(start_server, tmp_path):
     """stop_http_server.ps1 с ExpectedScriptPath останавливает ТОЛЬКО процесс
     этой установки.

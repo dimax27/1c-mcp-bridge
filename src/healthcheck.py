@@ -7,13 +7,24 @@
   * tools/list возвращает ВСЕ пять инструментов моста;
   * list_databases вызывается без ошибки.
 
-Запуск:   python healthcheck.py     (ONEC_HTTP_TOKEN — в переменной окружения)
-Код:      0 = проверка пройдена; 1 = сервер недоступен/инструменты не те;
-          2 = list_databases вернул ошибку.
-Вывод — ASCII-маркеры (HEALTH_OK / HEALTH_TOOLS_MISSING / ...) для журналов.
+Режим `--com` дополнительно проверяет COM-подключение и метаданные каждой
+включённой базы: вызывает list_metadata с заведомо несуществующим фильтром и
+проверяет, что сервер вернул правильный тип коллекции без ошибки.
+
+Запуск:   python healthcheck.py [--com] [--database <key>]
+          (ONEC_HTTP_TOKEN — в переменной окружения, порт — ONEC_HTTP_PORT)
+
+Код:      0 = проверка пройдена;
+          1 = сервер недоступен / нет токена / инструменты не те;
+          2 = list_databases вернул ошибку;
+          3 = COM-проба (--com) не прошла хотя бы для одной базы.
+Вывод — ASCII-маркеры (HEALTH_OK / HEALTH_TOOLS_MISSING / HEALTH_COM_FAIL...),
+имена баз и ошибок экранируются (ensure_ascii), безопасно для журналов.
 """
 
+import argparse
 import asyncio
+import json
 import os
 
 EXPECTED_TOOLS = {
@@ -24,8 +35,49 @@ EXPECTED_TOOLS = {
     "list_metadata",
 }
 
+# "Справочники" через unicode-escape: ASCII-safe, не зависит от кодировки консоли.
+METADATA_DIRECTORIES = (
+    "\u0421\u043f\u0440\u0430\u0432\u043e\u0447\u043d\u0438\u043a\u0438"
+)
+PROBE_FILTER = "__1C_BRIDGE_CONNECTION_PROBE__"
 
-async def run() -> int:
+
+def _result_text(result) -> str:
+    return "".join(
+        getattr(item, "text", "") or ""
+        for item in getattr(result, "content", []) or []
+    )
+
+
+async def _probe_com(client, databases: list[str]) -> list[str]:
+    """Проверяет COM/метаданные каждой базы. Возвращает список неудач."""
+    failures: list[str] = []
+    for db in databases:
+        try:
+            res = await client.call_tool(
+                "list_metadata",
+                {
+                    "metadata_type": METADATA_DIRECTORIES,
+                    "name_filter": PROBE_FILTER,
+                    "database": db,
+                },
+            )
+            text = _result_text(res)
+            payload = json.loads(text) if text else {}
+            ok = (
+                not getattr(res, "is_error", False)
+                and not payload.get("error")
+                and payload.get("type") == METADATA_DIRECTORIES
+            )
+        except Exception:  # noqa: BLE001 — любая ошибка = провал пробы
+            ok = False
+        print(f"HEALTH_COM {db} {'OK' if ok else 'FAIL'}")
+        if not ok:
+            failures.append(db)
+    return failures
+
+
+async def run(args) -> int:
     token = os.environ.get("ONEC_HTTP_TOKEN", "").strip()
     if not token:
         print("HEALTH_NO_TOKEN")
@@ -46,12 +98,48 @@ async def run() -> int:
             if getattr(result, "is_error", False):
                 print("HEALTH_LIST_DATABASES_ERROR")
                 return 2
+            text = _result_text(result)
+            payload = json.loads(text) if text else {}
+            databases = sorted((payload.get("databases") or {}).keys())
+
+            if args.com:
+                selected = [args.database] if args.database else databases
+                if not selected:
+                    print("HEALTH_COM_NO_DATABASES")
+                    return 0
+                failures = await _probe_com(client, selected)
+                if failures:
+                    print("HEALTH_COM_FAIL:", ",".join(failures))
+                    return 3
+                print("HEALTH_COM_OK")
+                return 0
+
+            print(f"HEALTH_OK tools={len(names)} databases={len(databases)}")
+            return 0
     except Exception as exc:  # noqa: BLE001 — причина ошибки выводится в консоль
         print("HEALTH_CONNECT_ERROR:", type(exc).__name__)
         return 1
-    print(f"HEALTH_OK tools={len(names)}")
-    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="healthcheck.py",
+        description="MCP health-check моста 1C (5 инструментов + list_databases; "
+        "с --com ещё и COM/метаданные каждой базы).",
+    )
+    parser.add_argument(
+        "--com",
+        action="store_true",
+        help="проверить COM-подключение и метаданные каждой включённой базы",
+    )
+    parser.add_argument(
+        "--database",
+        metavar="KEY",
+        help="в режиме --com проверить только одну базу",
+    )
+    args = parser.parse_args()
+    return asyncio.run(run(args))
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(run()))
+    raise SystemExit(main())

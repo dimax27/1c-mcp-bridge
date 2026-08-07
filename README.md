@@ -278,12 +278,26 @@ HTTP-сервер слушает только `127.0.0.1:8000`. Журнал —
 1. **Ярлык «Статус HTTP-сервера»** — порт, токен, секция ChatGPT, хвост журнала.
 2. **Журнал** `%PROGRAMDATA%\1cMcpBridge\http-server.log` — если сервер «молча»
    не стартует (занят порт, не найден модуль, битый `databases.json`), причина
-   будет там.
+   будет там. Файл в **UTF-8** — читайте с явной кодировкой:
+   ```powershell
+   Get-Content "$env:ProgramData\1cMcpBridge\http-server.log" -Encoding UTF8 -Tail 50
+   ```
 3. **detect_1c.ps1** (в папке установки) — сводка: платформы 1С, Python,
    настройки MCP-клиентов.
 4. **`@1c-bridge` не виден в чате?** Перезапустите клиент полностью (трей →
    Quit), в ChatGPT Desktop проверьте «Плагины → MCP → Серверы» (включён ли
    `1c-bridge`) и выполните Scan Tools/Refresh.
+5. **Глубокая проверка COM/метаданных** — единый healthcheck с пробой каждой
+   включённой базы (tools/list + list_databases + COM-подключение через
+   `list_metadata` с заведомо несуществующим фильтром):
+   ```powershell
+   $env:ONEC_HTTP_TOKEN = (Get-Content "$env:ProgramData\1cMcpBridge\.http_token" -Raw).Trim()
+   & "$env:ProgramFiles\1cMcpBridge\.venv\Scripts\python.exe" "$env:ProgramFiles\1cMcpBridge\healthcheck.py" --com
+   ```
+   Успех: `HEALTH_COM_OK`, код 0. При ошибке выводится `HEALTH_COM_FAIL: <базы>`
+   и код 3. Тот же скрипт без `--com` (или с `--database <ключ>` для одной базы)
+   используется установщиком и ярлыком «Перезапустить HTTP-сервер» — проверки
+   всегда одинаковые.
 
 ## Сборка из исходников
 
