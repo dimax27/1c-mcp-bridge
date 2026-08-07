@@ -722,6 +722,12 @@ begin
   CreateConnectionParamsPage;
   CreateTestPage;
   TestPassed := False;
+  // финальный экран — подсказка про режимы ChatGPT Desktop
+  WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption +
+    #13#10#13#10 +
+    'Для работы 1C MCP Bridge откройте новый разговор ChatGPT Desktop в режиме' +
+    ' Work или Codex. Обычный Chat локальный MCP не использует.' +
+    #13#10 + 'Проверка: /mcp → 1c-bridge → Включено → спросите показать список баз.';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
