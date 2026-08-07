@@ -211,7 +211,7 @@ def test_token_fallback_from_file(start_server, tmp_path):
         token=None,  # не задаём токен через env — сервер сам прочитает файл
     )
     url = f"http://127.0.0.1:{ctx['port']}/mcp/{fallback_token}"
-    names, annotations, _ = _probe_tools(url)
+    names, _, _ = _probe_tools(url)
     assert "list_databases" in names, f"tools/list: {names}"
     # /mcp без токена — всё ещё 404 (защита на месте)
     with pytest.raises(urllib.error.HTTPError) as excinfo:
