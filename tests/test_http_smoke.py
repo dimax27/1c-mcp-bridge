@@ -257,8 +257,9 @@ def test_installer_stops_only_target_server(start_server, tmp_path):
       - посторонний процесс на другом порту — выживает;
       - целевой сервер этой установки — останавливается.
     """
-    target_port = 18731
-    other_port = 18732
+    # свободные порты вместо хардкода: на CI-раннерах 18731/18732 могут быть заняты
+    target_port = _free_port()
+    other_port = _free_port()
     ctx = start_server(port=target_port)
     assert ctx["proc"].poll() is None, "целевой сервер должен быть запущен"
 
