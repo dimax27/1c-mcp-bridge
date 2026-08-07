@@ -81,6 +81,8 @@ Source: "..\README.md";                  DestDir: "{app}";              Flags: i
 ; PowerShell-скрипты установки (вызываются из [Run])
 Source: "install.ps1";                   DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "stop_http_server.ps1";          DestDir: "{app}\installer";    Flags: ignoreversion
+Source: "restart_http_server.ps1";       DestDir: "{app}\installer";    Flags: ignoreversion
+Source: "status_http_server.ps1";        DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "test_connection.ps1";           DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "uninstall.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
 Source: "detect_1c.ps1";                 DestDir: "{app}\installer";    Flags: ignoreversion
@@ -105,6 +107,24 @@ Name: "{group}\1C Bridge (HTTP-сервер)"; \
   WorkingDir: "{app}"; \
   IconFilename: "{app}\assets\icon.ico"; \
   Comment: "Запускает HTTP-сервер моста для Qwen, ChatGPT/Codex и др. (без окна). Остановка — Диспетчер задач → python.exe"
+Name: "{group}\Остановить HTTP-сервер"; \
+  Filename: "powershell.exe"; \
+  Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\installer\stop_http_server.ps1"" -Interactive"; \
+  WorkingDir: "{app}\installer"; \
+  IconFilename: "{app}\assets\icon.ico"; \
+  Comment: "Останавливает HTTP-сервер моста и освобождает порт 8000"
+Name: "{group}\Перезапустить HTTP-сервер"; \
+  Filename: "powershell.exe"; \
+  Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\installer\restart_http_server.ps1"" -Interactive"; \
+  WorkingDir: "{app}\installer"; \
+  IconFilename: "{app}\assets\icon.ico"; \
+  Comment: "Останавливает и заново запускает HTTP-сервер моста"
+Name: "{group}\Статус HTTP-сервера"; \
+  Filename: "powershell.exe"; \
+  Parameters: "-ExecutionPolicy Bypass -NoProfile -File ""{app}\installer\status_http_server.ps1"" -Interactive"; \
+  WorkingDir: "{app}\installer"; \
+  IconFilename: "{app}\assets\icon.ico"; \
+  Comment: "Проверяет статус HTTP-сервера моста: процесс, порт 8000, токен, конфиг, журнал"
 Name: "{group}\Открыть папку установки"; Filename: "{app}"
 Name: "{group}\Удалить {#MyAppName}";    Filename: "{uninstallexe}"
 Name: "{group}\Документация";            Filename: "{#MyAppURL}"

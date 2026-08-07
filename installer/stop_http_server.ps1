@@ -13,7 +13,9 @@
 # =============================================================================
 
 [CmdletBinding()]
-param()
+param(
+    [switch]$Interactive  # при запуске из ярлыка: пауза после завершения
+)
 
 function Stop-BridgeHttpServer {
     [CmdletBinding()]
@@ -79,5 +81,8 @@ function Stop-BridgeHttpServer {
 # Прямой запуск (не dot-source): выполняем и завершаемся кодом результата
 if ($MyInvocation.InvocationName -ne '.') {
     $ok = Stop-BridgeHttpServer
+    if ($Interactive) {
+        Read-Host "`nНажмите Enter для закрытия..."
+    }
     exit $(if ($ok) { 0 } else { 1 })
 }
