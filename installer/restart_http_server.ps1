@@ -25,7 +25,11 @@ if (-not (Test-Path $StopScript)) {
     exit 1
 }
 . $StopScript
-$stopped = Stop-BridgeHttpServer
+$AppDir = Split-Path $PSScriptRoot -Parent
+$stopped = Stop-BridgeHttpServer `
+    -Port 8000 `
+    -ExpectedScriptPath (Join-Path $AppDir 'mcp_server_1c_http.py') `
+    -ExpectedPythonPath (Join-Path $AppDir '.venv\Scripts\python.exe')
 
 # 2) Запускаем сервер заново через VBS-лаунчер
 $Vbs = Join-Path (Split-Path $PSScriptRoot -Parent) 'start_1c_bridge_silent.vbs'

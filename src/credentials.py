@@ -9,9 +9,7 @@ Migration from plaintext to encrypted happens automatically on first load.
 from __future__ import annotations
 
 import base64
-import json
 import logging
-import os
 import re
 from typing import Any
 

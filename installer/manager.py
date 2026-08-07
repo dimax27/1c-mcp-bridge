@@ -32,12 +32,9 @@ import json
 import os
 import sys
 import threading
-from pathlib import Path
-from typing import Any
-
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, scrolledtext
-
+from pathlib import Path
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 # ---------------------------------------------------------------------------
 # Конфигурация
@@ -79,6 +76,68 @@ def find_databases_file() -> Path:
 
 
 DB_FILE = find_databases_file()
+
+# Корень установки {app} = родитель папки manager; credentials.py лежит рядом
+# с сервером ({app}\credentials.py) — добавляем его в путь для DPAPI-тестов.
+APP_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(APP_DIR))
+
+# Те же регулярки, что у сервера: иначе при ручном редактировании строки
+# (например `Pwd = "x"` с пробелами или `pwd=` в другом регистре) пароль
+# останется рядом с DPAPI-blob, а Usr не распознается формой.
+from credentials import _PWD_RE, _USR_RE
+
+# ---------------------------------------------------------------------------
+# DPAPI-credential: не стираем сохранённый пароль при редактировании базы
+# ---------------------------------------------------------------------------
+
+def _strip_pwd(conn: str) -> str:
+    return _PWD_RE.sub("", conn)
+
+
+def assemble_db_config(
+    existing,
+    *,
+    enabled,
+    description,
+    progid,
+    connection_string,
+    notes,
+    dll_path="",
+    password_modified=False,
+) -> dict:
+    """Собирает конфиг базы из формы.
+
+    Если у существующей базы есть DPAPI-credential, а пользователь не вводил
+    новый пароль — credential сохраняется, а Pwd= из connection_string
+    убирается. Иначе (новый пароль, новая база) — обычная строка с Pwd=.
+    """
+    cfg = {
+        "enabled": enabled,
+        "description": description,
+        "progid": progid,
+        "connection_string": connection_string,
+        "notes": notes,
+    }
+    if dll_path:
+        cfg["dll_path"] = dll_path
+
+    cred = existing.get("credential") if isinstance(existing, dict) else None
+    if cred and not password_modified:
+        cfg["credential"] = cred
+        cfg["connection_string"] = _strip_pwd(connection_string)
+    return cfg
+
+
+def resolve_connection_string(existing, connection_string, password_modified) -> str:
+    """Строка для test_connection: расшифровывает DPAPI, если пароль не меняли."""
+    cred = existing.get("credential") if isinstance(existing, dict) else None
+    if cred and not password_modified:
+        from credentials import build_conn_str
+        db_cfg = dict(existing)
+        db_cfg["connection_string"] = _strip_pwd(connection_string)
+        return build_conn_str(db_cfg)
+    return connection_string
 
 
 def load_config() -> dict:
@@ -159,8 +218,8 @@ def test_connection(progid: str, conn_str: str, dll_path: str = "") -> tuple[boo
 
     # Регистрируем коннектор если нужно (требует админа)
     try:
-        import win32com.client
         import pythoncom
+        import win32com.client
         pythoncom.CoInitialize()
         try:
             connector = win32com.client.Dispatch(progid)
@@ -170,7 +229,7 @@ def test_connection(progid: str, conn_str: str, dll_path: str = "") -> tuple[boo
             # Пытаемся регистрировать
             r = subprocess.run(
                 ["regsvr32", "/s", dll_path],
-                capture_output=True, text=True
+                capture_output=True, text=True, check=False,
             )
             if r.returncode != 0:
                 return False, (
@@ -182,7 +241,7 @@ def test_connection(progid: str, conn_str: str, dll_path: str = "") -> tuple[boo
             for d in bin_dir.glob("*.dll"):
                 if d.name.lower() == "comcntr.dll":
                     continue
-                subprocess.run(["regsvr32", "/s", str(d)], capture_output=True)
+                subprocess.run(["regsvr32", "/s", str(d)], capture_output=True, check=False)
             connector = win32com.client.Dispatch(progid)
 
         ib = connector.Connect(conn_str)
@@ -356,6 +415,14 @@ class ManagerApp(tk.Tk):
         self.entry_password.grid(row=row, column=1, columnspan=2, sticky="ew", pady=2)
         row += 1
 
+        self.var_cred_hint = tk.StringVar()
+        ttk.Label(right, textvariable=self.var_cred_hint, foreground="gray",
+                  anchor="w").grid(row=row, column=1, columnspan=2, sticky="w")
+        row += 1
+        self._current_credential = None
+        self._password_modified = False
+        self.var_password.trace_add("write", self._on_password_typed)
+
         # Notes — большой Text
         ttk.Label(right, text="Заметки для AI\n(что в этой базе):",
                   anchor="w", justify="left").grid(row=row, column=0, sticky="nw", pady=(8, 2))
@@ -423,9 +490,14 @@ class ManagerApp(tk.Tk):
 
     def _on_select(self, event=None):
         # Игнорируем dirty если форма ещё ни разу не была заполнена
-        if self.dirty and self.current_key is not None:
-            if not messagebox.askyesno("Несохранённые изменения",
-                                        "Есть несохранённые изменения. Отбросить?"):
+        if (
+            self.dirty
+            and self.current_key is not None
+            and not messagebox.askyesno(
+                "Несохранённые изменения",
+                "Есть несохранённые изменения. Отбросить?",
+            )
+        ):
                 # Возвращаем выделение
                 if self.current_key:
                     keys = sorted(self.config_data["databases"].keys())
@@ -469,7 +541,12 @@ class ManagerApp(tk.Tk):
 
         def extract(key):
             import re
-            m = re.search(rf'{key}="([^"]*)"', conn)
+            if key == "Pwd":
+                m = _PWD_RE.search(conn)
+            elif key == "Usr":
+                m = _USR_RE.search(conn)
+            else:
+                m = re.search(rf'{key}="([^"]*)"', conn)
             return m.group(1) if m else ""
 
         self.var_file.set(extract("File"))
@@ -478,6 +555,15 @@ class ManagerApp(tk.Tk):
         self.var_user.set(extract("Usr"))
         self.var_password.set(extract("Pwd"))
         self.var_os_auth.set(not extract("Usr"))
+
+        # DPAPI: пароль хранится в credential, а не в connection_string
+        self._current_credential = cfg.get("credential")
+        self._password_modified = False
+        if self._current_credential:
+            self.var_password.set("")
+            self.var_cred_hint.set("Пароль сохранён (DPAPI) — оставьте поле пустым, чтобы не менять")
+        else:
+            self.var_cred_hint.set("")
 
         # Notes
         self.text_notes.delete("1.0", tk.END)
@@ -504,6 +590,10 @@ class ManagerApp(tk.Tk):
             pass
 
     # ----- Тип / аутентификация -----
+    def _on_password_typed(self, *_):
+        if not getattr(self, "_loading", False):
+            self._password_modified = True
+
     def _on_type_change(self):
         is_file = self.var_type.get() == "file"
         for w, show in [(self.entry_server, not is_file),
@@ -742,6 +832,7 @@ class ManagerApp(tk.Tk):
 
         # Если поменяли key — переименовать
         old_key = self.current_key
+        existing_cfg = self.config_data["databases"].get(old_key)
         if old_key and old_key != key:
             if key in self.config_data["databases"]:
                 messagebox.showerror("Ошибка", f"База '{key}' уже существует.")
@@ -751,17 +842,19 @@ class ManagerApp(tk.Tk):
                 self.config_data["default_database"] = key
 
         progid, dll = self._selected_progid_and_dll()
-        cfg = {
-            "enabled": self.var_enabled.get(),
-            "description": self.var_description.get().strip(),
-            "progid": progid,
-            "connection_string": self._build_connstr(),
-            "notes": self.text_notes.get("1.0", "end-1c").strip(),
-        }
-        if dll:
-            cfg["dll_path"] = dll
+        cfg = assemble_db_config(
+            existing_cfg,
+            enabled=self.var_enabled.get(),
+            description=self.var_description.get().strip(),
+            progid=progid,
+            connection_string=self._build_connstr(),
+            notes=self.text_notes.get("1.0", "end-1c").strip(),
+            dll_path=dll,
+            password_modified=self._password_modified,
+        )
         self.config_data["databases"][key] = cfg
         self.current_key = key
+        self._password_modified = False
         save_config(self.config_data)
         self.dirty = False
         self._refresh_list()
@@ -773,9 +866,13 @@ class ManagerApp(tk.Tk):
             self.listbox.selection_set(keys.index(key))
 
         self.status_var.set(f"База '{key}' сохранена. Перезапустите MCP-клиент.")
+        bridge_note = ""
+        if self._restart_bridge_if_running():
+            bridge_note = "\n  HTTP-сервер моста перезапущен автоматически."
+            self.status_var.set(f"База '{key}' сохранена; HTTP-сервер моста перезапущен.")
         messagebox.showinfo(
             "Сохранено",
-            f"База '{key}' сохранена.\n\n"
+            f"База '{key}' сохранена.{bridge_note}\n\n"
             "Чтобы изменения вступили в силу — перезапустите ваш MCP-клиент:\n"
             "  Claude Desktop: правый клик по иконке в трее → Quit → запустить снова.\n"
             "  Qwen / Kimi Desktop: закрыть приложение и запустить заново."
@@ -783,7 +880,10 @@ class ManagerApp(tk.Tk):
 
     def _on_test(self):
         progid, dll = self._selected_progid_and_dll()
-        connstr = self._build_connstr()
+        existing = self.config_data["databases"].get(self.current_key)
+        connstr = resolve_connection_string(
+            existing, self._build_connstr(), self._password_modified
+        )
         self.status_var.set("Проверяю подключение...")
         self.btn_test["state"] = "disabled"
         self.update()
@@ -793,6 +893,44 @@ class ManagerApp(tk.Tk):
             self.after(0, lambda: self._show_test_result(ok, msg))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _restart_bridge_if_running(self) -> bool:
+        """Если HTTP-сервер моста запущен — перезапускаем его (изменения БД
+        подхватываются сразу, без ручного рестарта). Возвращает True, если
+        перезапуск выполнен."""
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", 8000), timeout=1):
+                pass
+            running = True
+        except OSError:
+            running = False
+        if not running:
+            return False
+        stop_script = APP_DIR / "installer" / "stop_http_server.ps1"
+        vbs = APP_DIR / "start_1c_bridge_silent.vbs"
+        if not (stop_script.exists() and vbs.exists()):
+            return False
+        import subprocess
+        try:
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(stop_script)],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+            out = (res.stdout or "") + (res.stderr or "")
+            # запускаем новый сервер только если старый действительно остановлен
+            if res.returncode != 0 or "PORT_8000_BUSY" in out or "PORT_8000_FREE" not in out:
+                return False
+            subprocess.Popen(
+                ["wscript.exe", str(vbs)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            return False
 
     def _show_test_result(self, ok: bool, msg: str):
         self.btn_test["state"] = "normal"

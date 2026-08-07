@@ -71,13 +71,15 @@ log = logging.getLogger("mcp-1c")
 # Загрузка списка баз
 # ---------------------------------------------------------------------------
 
-from query_timeout import check_slow
-from credentials import build_conn_str, migrate_to_encrypted
 from config import (
-    positive_env_int,
-    HARD_LIMIT, DEFAULT_LIMIT,
-    MAX_QUERY_LENGTH, MAX_COLUMNS, MAX_PARAMETERS,
+    DEFAULT_LIMIT,
+    HARD_LIMIT,
+    MAX_COLUMNS,
+    MAX_PARAMETERS,
+    MAX_QUERY_LENGTH,
 )
+from credentials import build_conn_str, migrate_to_encrypted
+from query_timeout import check_slow
 
 
 def find_databases_file() -> Path:
@@ -624,8 +626,8 @@ def execute_query(
         return {"error": f"Внутренняя ошибка: {e}"}
 
 
-from threading import RLock
 from copy import deepcopy
+from threading import RLock
 
 _metadata_cache: dict[tuple[str, str], dict] = {}
 _metadata_cache_lock = RLock()

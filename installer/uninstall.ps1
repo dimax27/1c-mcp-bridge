@@ -1,7 +1,11 @@
-# =============================================================================
+﻿# =============================================================================
 #  uninstall.ps1 — cleanup during uninstall.
 #   * Removes "1c-bridge" block from ALL supported MCP client configs:
-#     Claude Desktop, Qwen Desktop, Kimi Desktop.
+#     ChatGPT Desktop (Codex), Claude Desktop, Qwen Desktop, Kimi Desktop,
+#     Reasonix.
+#   * ChatGPT (Codex config.toml) обрабатывается ВСЕГДА и независимо от
+#     остальных клиентов: даже если других клиентов нет, мёртвая секция
+#     из ~/.codex/config.toml будет удалена.
 #   * COM connector is NOT unregistered (other apps may need it).
 #   * Python and venv are removed by Inno Setup along with the install folder.
 # =============================================================================
@@ -10,6 +14,11 @@
 param()
 
 $ErrorActionPreference = 'Continue'
+
+# Корень установки: uninstall.ps1 лежит в {app}\installer
+$InstallRoot = Split-Path $PSScriptRoot -Parent
+$VenvPython = Join-Path $InstallRoot '.venv\Scripts\python.exe'
+$ClientsScript = Join-Path $InstallRoot 'clients_config.py'
 
 # Останавливаем HTTP-сервер моста, если он ещё запущен (иначе он держит
 # файлы venv и порт 8000 на время удаления).
@@ -20,6 +29,26 @@ if (Test-Path $StopServerScript) {
         Stop-BridgeHttpServer | Out-Null
     } catch {
         Write-Host "Не удалось остановить HTTP-сервер моста: $($_.Exception.Message)"
+    }
+}
+
+# --- ChatGPT Desktop (OpenAI Codex): config.toml лежит в профиле пользователя.
+#     Обрабатываем до любых ранних выходов: на машине только с ChatGPT
+#     деинсталлятор обязан удалить секцию 1c-bridge. ---
+$UserProfiles = Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -notin @('Public','Default','Default User','All Users') }
+foreach ($u in $UserProfiles) {
+    $CodexCfg = Join-Path $u.FullName '.codex\config.toml'
+    if (-not (Test-Path $CodexCfg)) { continue }
+    if ((Test-Path $VenvPython) -and (Test-Path $ClientsScript)) {
+        try {
+            & $VenvPython $ClientsScript remove-codex --path $CodexCfg --server '1c-bridge' | Out-Null
+            Write-Host "Removed 1c-bridge from ChatGPT Desktop config: $CodexCfg"
+        } catch {
+            Write-Host "Failed to update ChatGPT Desktop config: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Host "WARNING: секция 1c-bridge осталась в $CodexCfg — удалите её вручную (мост уже удалён)."
     }
 }
 
@@ -43,12 +72,6 @@ function Get-InteractiveAppData {
         }
     }
     return $null
-}
-
-$AppData = Get-InteractiveAppData
-if (-not $AppData) {
-    Write-Host "No MCP client configs found — nothing to remove."
-    exit 0
 }
 
 # Supported MCP clients: dir, config filename
@@ -80,6 +103,12 @@ function ConvertTo-HashtableDeep {
     return $obj
 }
 
+$AppData = Get-InteractiveAppData
+if (-not $AppData) {
+    Write-Host "No other MCP client configs found — nothing to remove."
+    exit 0
+}
+
 foreach ($client in $MCPClients) {
     if ($client.subdir) {
         $ConfigPath = Join-Path $AppData ($client.dir + '\' + $client.subdir + '\' + $client.config)
@@ -106,26 +135,6 @@ foreach ($client in $MCPClients) {
         }
     } catch {
         Write-Host "Failed to update $($client.dir) config: $($_.Exception.Message)"
-    }
-}
-
-# --- ChatGPT Desktop (OpenAI Codex): config.toml лежит в профиле пользователя ---
-$CodexPython = 'C:\Program Files\1cMcpBridge\.venv\Scripts\python.exe'
-$CodexScript = 'C:\Program Files\1cMcpBridge\clients_config.py'
-$UserProfiles = Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -notin @('Public','Default','Default User','All Users') }
-foreach ($u in $UserProfiles) {
-    $CodexCfg = Join-Path $u.FullName '.codex\config.toml'
-    if (-not (Test-Path $CodexCfg)) { continue }
-    if (Test-Path $CodexPython -and (Test-Path $CodexScript)) {
-        try {
-            & $CodexPython $CodexScript remove-codex --path $CodexCfg --server '1c-bridge' | Out-Null
-            Write-Host "Removed 1c-bridge from ChatGPT Desktop config: $CodexCfg"
-        } catch {
-            Write-Host "Failed to update ChatGPT Desktop config: $($_.Exception.Message)"
-        }
-    } else {
-        Write-Host "WARNING: секция 1c-bridge осталась в $CodexCfg — удалите её вручную (мост уже удалён)."
     }
 }
 

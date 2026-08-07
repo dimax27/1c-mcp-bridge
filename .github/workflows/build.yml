@@ -15,7 +15,38 @@ on:
         default: ''
 
 jobs:
+  # Релиз собирается ТОЛЬКО после зелёного набора проверок: compileall, ruff, pytest.
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Compile check
+        shell: pwsh
+        run: python -m compileall -q src installer
+
+      - name: Ruff check
+        shell: pwsh
+        run: ruff check src installer --ignore E501,E722
+
+      - name: Pytest
+        shell: pwsh
+        run: python -m pytest tests -q
+
   build:
+    needs: test
     runs-on: windows-latest
 
     steps:
@@ -35,6 +66,15 @@ jobs:
           }
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Building version: $v"
+
+      # Запекаем версию в src/version.py: после установки APP_VERSION уже нет,
+      # и сервер должен показывать версию установщика, а не дефолтную.
+      - name: Bake version into src/version.py
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          "VERSION = '$v'" | Set-Content -Path src/version.py -Encoding UTF8
+          Get-Content src/version.py | Select-Object -Last 1
 
       - name: Install Inno Setup
         shell: pwsh

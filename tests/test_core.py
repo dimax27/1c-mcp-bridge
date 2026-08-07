@@ -16,14 +16,14 @@ sys.path.insert(0, SRC)
 # clients_config
 # ---------------------------------------------------------------------------
 
-from clients_config import (  # noqa: E402
+from clients_config import (
     KNOWN_CLIENTS,
+    _mcp_key,
     client_config_path,
     read_client_config,
-    write_client_config,
-    update_mcp_servers,
     remove_mcp_server,
-    _mcp_key,
+    update_mcp_servers,
+    write_client_config,
 )
 
 
@@ -138,7 +138,14 @@ class TestClientConfig:
 # Config (env validation + limits)
 # ---------------------------------------------------------------------------
 
-from config import positive_env_int, HARD_LIMIT, DEFAULT_LIMIT, MAX_QUERY_LENGTH, MAX_COLUMNS, MAX_PARAMETERS  # noqa: E402
+from config import (
+    DEFAULT_LIMIT,
+    HARD_LIMIT,
+    MAX_COLUMNS,
+    MAX_PARAMETERS,
+    MAX_QUERY_LENGTH,
+    positive_env_int,
+)
 
 
 class TestPositiveEnvInt:

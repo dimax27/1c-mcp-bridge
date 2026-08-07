@@ -67,7 +67,12 @@ def start_server(tmp_path):
     procs: list[subprocess.Popen] = []
     blockers: list[socket.socket] = []
 
-    def _start(*, log_file: Path | None = None, occupy_port: bool = False) -> dict:
+    def _start(
+        *,
+        log_file: Path | None = None,
+        occupy_port: bool = False,
+        port: int | None = None,
+    ) -> dict:
         db = tmp_path / f"databases-{len(procs)}.json"
         db.write_text(
             json.dumps(
@@ -88,7 +93,7 @@ def start_server(tmp_path):
             encoding="utf-8",
         )
 
-        port = _free_port()
+        port = port or _free_port()
         blocker = None
         if occupy_port:
             blocker = socket.socket()
@@ -117,6 +122,7 @@ def start_server(tmp_path):
         return {
             "proc": proc,
             "port": port,
+            "script": str(SERVER),
             "token_url": f"http://127.0.0.1:{port}/mcp/{_TOKEN}",
             "plain_url": f"http://127.0.0.1:{port}/mcp",
             "log_file": log_file,
@@ -241,45 +247,85 @@ def test_occupied_port_is_logged(start_server, tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="нужен PowerShell/Windows")
-def test_installer_stops_running_server(start_server):
-    """installer/stop_http_server.ps1 должен останавливать запущенный мост.
+def test_installer_stops_only_target_server(start_server, tmp_path):
+    """stop_http_server.ps1 с ExpectedScriptPath останавливает ТОЛЬКО процесс
+    этой установки.
 
-    Установщик вызывает этот скрипт в самом начале, чтобы старый сервер не
-    держал порт 8000 и файлы venv во время переустановки.
+    Установщик вызывает скрипт в самом начале, чтобы старый сервер не держал
+    порт и файлы venv во время переустановки. При этом:
+      - decoy с тем же именем скрипта из другого каталога — выживает;
+      - посторонний процесс на другом порту — выживает;
+      - целевой сервер этой установки — останавливается.
     """
-    ctx = start_server()
-    assert ctx["proc"].poll() is None, "сервер должен быть запущен"
+    target_port = 18731
+    other_port = 18732
+    ctx = start_server(port=target_port)
+    assert ctx["proc"].poll() is None, "целевой сервер должен быть запущен"
 
-    stop_script = REPO / "installer" / "stop_http_server.ps1"
-    assert stop_script.exists(), f"нет скрипта: {stop_script}"
+    # decoy: «тот же скрипт» из другого каталога — просто спящий процесс
+    decoy_dir = tmp_path / "other-install"
+    decoy_dir.mkdir()
+    decoy_script = decoy_dir / "mcp_server_1c_http.py"
+    decoy_script.write_text("import time; time.sleep(120)\n", encoding="utf-8")
+    decoy = subprocess.Popen([sys.executable, str(decoy_script)], cwd=str(decoy_dir))
 
-    result = subprocess.run(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(stop_script),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+    # посторонний процесс на другом порту (не мост)
+    foreign = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(other_port), "--bind", "127.0.0.1"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    assert result.returncode == 0, (
-        f"stop_http_server.ps1 упал: rc={result.returncode}\n"
-        f"stdout={result.stdout[-500:]}\nstderr={result.stderr[-500:]}"
-    )
-    assert "PORT_8000_FREE" in result.stdout, result.stdout[-500:]
 
-    # процесс моста должен завершиться
     try:
-        code = ctx["proc"].wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        ctx["proc"].kill()
-        pytest.fail("stop_http_server.ps1 не остановил сервер моста")
-    assert code is not None
+        stop_script = REPO / "installer" / "stop_http_server.ps1"
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(stop_script),
+                "-Port",
+                str(target_port),
+                "-ExpectedScriptPath",
+                ctx["script"],
+                "-ExpectedPythonPath",
+                sys.executable,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"stop_http_server.ps1 упал: rc={result.returncode}\n"
+            f"stdout={result.stdout[-600:]}\nstderr={result.stderr[-600:]}"
+        )
+        assert f"PORT_{target_port}_FREE" in result.stdout, result.stdout[-600:]
+
+        # целевой процесс завершён
+        try:
+            code = ctx["proc"].wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            ctx["proc"].kill()
+            pytest.fail("stop_http_server.ps1 не остановил целевой сервер")
+        assert code is not None
+
+        # decoy и посторонний процесс выжили
+        assert decoy.poll() is None, (
+            "decoy-процесс (тот же скрипт из другого каталога) не должен останавливаться"
+        )
+        assert foreign.poll() is None, (
+            "посторонний процесс на другом порту не должен останавливаться"
+        )
+    finally:
+        for p in (decoy, foreign):
+            p.kill()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
     # порт должен освободиться (соединение отклоняется)
     with socket.socket() as s:

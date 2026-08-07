@@ -17,10 +17,6 @@ from logging.handlers import RotatingFileHandler
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-# Общий handler: сначала подключается к bootstrap-логгеру, после успешного
-# импорта — к основному "mcp-1c". Один экземпляр на файл — без конфликтов ротации.
-_file_handler: RotatingFileHandler | None = None
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -36,9 +32,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def setup_bootstrap_logging(log_file: str) -> logging.Logger:
-    """Журнал доступен ещё до импорта mcp_server_1c."""
+    """Журнал доступен ещё до импорта mcp_server_1c.
+
+    Файловый handler подключаем сразу к обоим логгерам — и bootstrap, и
+    основному "mcp-1c": ошибки чтения databases.json, перехваченные внутри
+    модуля при импорте, попадают в файл, а не только в скрытый stderr.
+    """
     bootstrap = logging.getLogger("mcp-1c.bootstrap")
-    global _file_handler
     if not log_file:
         return bootstrap
     try:
@@ -49,8 +49,17 @@ def setup_bootstrap_logging(log_file: str) -> logging.Logger:
         bootstrap.error("Не удалось открыть журнал %s: %s", log_file, exc)
         return bootstrap
     _file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    bootstrap.addHandler(_file_handler)
-    bootstrap.setLevel(os.environ.get("ONEC_LOG_LEVEL", "INFO"))
+    level = os.environ.get("ONEC_LOG_LEVEL", "INFO")
+    # Файловый handler вешаем ТОЛЬКО на "mcp-1c": "mcp-1c.bootstrap" — его
+    # дочерний логгер (propagate=True), поэтому сообщения bootstrap попадают
+    # в тот же файл, но без дублирования.
+    logger = logging.getLogger("mcp-1c")
+    if not any(
+        isinstance(h, RotatingFileHandler) and h.baseFilename == _file_handler.baseFilename
+        for h in logger.handlers
+    ):
+        logger.addHandler(_file_handler)
+    logger.setLevel(level)
     return bootstrap
 
 
@@ -70,8 +79,8 @@ def main() -> int:
         bootstrap.exception("Не удалось импортировать MCP-сервер (mcp_server_1c)")
         return 1
 
-    if _file_handler is not None:
-        log.addHandler(_file_handler)
+    # Файловый handler уже подключён к "mcp-1c" в setup_bootstrap_logging.
+    log.setLevel(os.environ.get("ONEC_LOG_LEVEL", "INFO"))
 
     # Random path prefix if token is set (defense-in-depth for localhost).
     # Сам токен в лог не выводим — он является частью URL MCP.

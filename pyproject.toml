@@ -1,0 +1,23 @@
+# Конфигурация ruff для проекта 1C MCP Bridge.
+#
+# CI и build.yml запускают:  ruff check src installer --ignore E501,E722
+# Здесь фиксируем намеренные исключения (см. per-file-ignores), чтобы гейт
+# релиза проходил и не копил «долг» на каждую новую правку.
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# E501: длинные строки — принято в проекте (строки выравниваются вручную).
+# E722: голый except — используется осознанно в нескольких местах.
+extend-ignore = ["E501", "E722"]
+
+[tool.ruff.lint.per-file-ignores]
+# src/mcp_server_1c.py — COM-граница 1С: широкий except здесь осознанное
+# решение, чтобы одиночный сбой запроса не ронял весь MCP-сервер
+# (возвращается {"error": ...}). TRY004/DTZ001 — особенности форматирования
+# дат 1С и типов из COM-обёрток.
+"src/mcp_server_1c.py" = ["BLE001", "TRY004", "DTZ001"]
+# installer/manager.py — GUI: широкий except вокруг win32/UI-вызовов,
+# молчаливые обработчики буфера обмена и т.п. (best-effort, без логгера).
+"installer/manager.py" = ["BLE001", "S110"]

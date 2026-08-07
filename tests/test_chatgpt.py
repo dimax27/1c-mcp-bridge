@@ -11,10 +11,10 @@ COM servers).
 
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 SRC = str(Path(__file__).resolve().parent.parent / "src")
 sys.path.insert(0, SRC)
@@ -169,3 +169,107 @@ fontSize = 14
         p = self._tmp('')
         with pytest.raises(ValueError):
             patch_codex_config_toml(p, 'bad name; inject = "x"', "http://x")
+
+    def test_user_settings_preserved(self):
+        """Патчер не трогает настройки пользователя: timeouts, approval, tools.*."""
+        cfg = (
+            "[mcp_servers.1c-bridge]\n"
+            'enabled = true\n'
+            'tool_timeout_sec = 180\n'
+            'required = true\n'
+            'enabled_tools = ["list_databases", "execute_query"]\n'
+            'default_tools_approval_mode = "writes"\n'
+            'url = "http://127.0.0.1:8000/mcp/OLD"\n'
+            'command = "C:\\\\Program Files\\\\1cMcpBridge\\\\.venv\\\\Scripts\\\\python.exe"\n'
+            'args = ["C:\\\\Program Files\\\\1cMcpBridge\\\\mcp_server_1c.py"]\n'
+            "\n"
+            "[mcp_servers.1c-bridge.env]\n"
+            'ONEC_DATABASES_FILE = "C:\\\\ProgramData\\\\1cMcpBridge\\\\databases.json"\n'
+            "\n"
+            "[mcp_servers.1c-bridge.tools.execute_query]\n"
+            'approval_mode = "prompt"\n'
+            "\n"
+            "[desktop]\n"
+            "fontSize = 14\n"
+        )
+        p = self._tmp(cfg)
+        changed = patch_codex_config_toml(p, "1c-bridge", "http://127.0.0.1:8000/mcp/NEW")
+        assert changed is True
+        data = tomllib.loads(p.read_text(encoding="utf-8"))
+        srv = data["mcp_servers"]["1c-bridge"]
+        # url обновлён, транспорт удалён
+        assert srv["url"] == "http://127.0.0.1:8000/mcp/NEW"
+        assert "command" not in srv and "args" not in srv
+        # пользовательские настройки на месте
+        assert srv["enabled"] is True
+        assert srv["tool_timeout_sec"] == 180
+        assert srv["required"] is True
+        assert srv["enabled_tools"] == ["list_databases", "execute_query"]
+        assert srv["default_tools_approval_mode"] == "writes"
+        # подсекция .env удалена, а .tools.execute_query сохранена
+        assert "env" not in data["mcp_servers"]["1c-bridge"]
+        assert data["mcp_servers"]["1c-bridge"]["tools"]["execute_query"]["approval_mode"] == "prompt"
+
+    def test_environs_subtable_not_touched(self):
+        """Подсекция с похожим именем (.environs) не удаляется патчером."""
+        cfg = (
+            "[mcp_servers.1c-bridge]\n"
+            'url = "http://127.0.0.1:8000/mcp/OLD"\n'
+            "\n"
+            "[mcp_servers.1c-bridge.env]\n"
+            'ONEC_DATABASES_FILE = "C:\\\\x"\n'
+            "\n"
+            "[mcp_servers.1c-bridge.environs]\n"
+            "foo = 1\n"
+        )
+        p = self._tmp(cfg)
+        patch_codex_config_toml(p, "1c-bridge", "http://127.0.0.1:8000/mcp/NEW")
+        data = tomllib.loads(p.read_text(encoding="utf-8"))
+        srv = data["mcp_servers"]["1c-bridge"]
+        assert srv["url"] == "http://127.0.0.1:8000/mcp/NEW"
+        assert "env" not in srv
+        assert data["mcp_servers"]["1c-bridge"]["environs"]["foo"] == 1
+
+    def test_multiline_args_removed_cleanly(self):
+        """Многострочное значение args = [...] удаляется целиком, результат
+        остаётся валидным TOML."""
+        cfg = (
+            "[mcp_servers.1c-bridge]\n"
+            'enabled = true\n'
+            'url = "http://127.0.0.1:8000/mcp/OLD"\n'
+            'args = [\n'
+            '  "C:\\\\Program Files\\\\1cMcpBridge\\\\mcp_server_1c.py",\n'
+            '  "--flag",\n'
+            ']\n'
+            "\n"
+            "[desktop]\n"
+            "fontSize = 14\n"
+        )
+        p = self._tmp(cfg)
+        patch_codex_config_toml(p, "1c-bridge", "http://127.0.0.1:8000/mcp/NEW")
+        raw = p.read_text(encoding="utf-8")
+        # результат валиден и не содержит остатков массива
+        data = tomllib.loads(raw)
+        srv = data["mcp_servers"]["1c-bridge"]
+        assert srv["url"] == "http://127.0.0.1:8000/mcp/NEW"
+        assert srv["enabled"] is True
+        assert "args" not in srv
+        assert "--flag" not in raw
+
+    def test_cli_stdout_redacts_token(self):
+        """CLI не выводит токен в stdout."""
+        import subprocess
+        import sys
+
+        p = self._tmp("[desktop]\nfontSize = 14\n")
+        url = "http://127.0.0.1:8000/mcp/SECRETTOKEN123"
+        script = Path(__file__).resolve().parent.parent / "src" / "clients_config.py"
+        proc = subprocess.run(
+            [sys.executable, str(script), "patch-codex", "--path", str(p), "--server", "1c-bridge", "--url", url],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "SECRETTOKEN123" not in proc.stdout
+        assert "url=http://127.0.0.1:8000/mcp/<token>" in proc.stdout

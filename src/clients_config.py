@@ -309,7 +309,6 @@ def patch_codex_config_toml(config_path: Path, server_name: str, url: str) -> bo
     import re
     import shutil
     import tempfile
-
     import tomllib
 
     if not re.fullmatch(r"[\w.\-]+", server_name):
@@ -344,22 +343,62 @@ def patch_codex_config_toml(config_path: Path, server_name: str, url: str) -> bo
         stripped = line.strip()
         if not found_section and stripped == section:
             found_section = True
-            # пропускаем тело секции
-            i += 1
-            while i < len(lines):
-                if lines[i].strip().startswith("["):
-                    break
+            if url is None:
+                # удаляем секцию целиком (тело + все подсекции)
                 i += 1
-            # пропускаем подсекции [mcp_servers.<name>.*] (например .env)
-            while i < len(lines) and lines[i].strip().startswith(sub_prefix):
+                while i < len(lines):
+                    if lines[i].strip().startswith("["):
+                        break
+                    i += 1
+                while i < len(lines) and lines[i].strip().startswith(sub_prefix):
+                    i += 1
+                    while i < len(lines) and not lines[i].strip().startswith("["):
+                        i += 1
+                continue
+            # Секция есть — правим точечно: заменяем только url, убираем только
+            # несовместимые транспортные ключи и точную подсекцию .env.
+            # Всё остальное (enabled, required, tool_timeout_sec, approval
+            # modes, enabled_tools, [mcp_servers.<name>.tools.*] и т.п.)
+            # пользовательские настройки сохраняются.
+            out.append(line)
+            i += 1
+            url_written = False
+            while i < len(lines):
+                ln = lines[i]
+                s = ln.strip()
+                if s.startswith("["):
+                    break
+                if "=" in s:
+                    key = s.split("=", 1)[0].strip()
+                    if key == "url":
+                        out.append(url_line)
+                        url_written = True
+                        i += 1
+                        continue
+                    if key in ("command", "args", "cwd"):
+                        # stdio-транспорт, несовместимый с streamable-http.
+                        # Дочитываем многострочное значение (args = [\n ... ]).
+                        i += 1
+                        value = s.split("=", 1)[1] if "=" in s else ""
+                        depth = value.count("[") - value.count("]")
+                        depth += value.count("{") - value.count("}")
+                        while i < len(lines) and depth > 0:
+                            body = lines[i]
+                            depth += body.count("[") - body.count("]")
+                            depth += body.count("{") - body.count("}")
+                            i += 1
+                        continue
+                out.append(ln)
+                i += 1
+            if url is not None and not url_written:
+                # секция была без url (миграция stdio → http): добавляем
+                out.append(url_line)
+            # удаляем только точную подсекцию .env (другие .tools.*,
+            # .environs и т.п. подсекции не трогаем)
+            while i < len(lines) and lines[i].strip().startswith(sub_prefix + "env]"):
                 i += 1
                 while i < len(lines) and not lines[i].strip().startswith("["):
                     i += 1
-            if url is not None:
-                out.append(section)
-                out.append("enabled = true")
-                out.append(url_line)
-            out.append("")
             continue
         out.append(line)
         i += 1
@@ -404,6 +443,14 @@ def patch_codex_config_toml(config_path: Path, server_name: str, url: str) -> bo
     return True
 
 
+def _redact_url(url: str) -> str:
+    """Маскирует токен в URL: http://127.0.0.1:8000/mcp/<token>."""
+    marker = "/mcp/"
+    if marker in url:
+        return url.split(marker, 1)[0] + marker + "<token>"
+    return url
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -431,9 +478,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.cmd == "patch-codex":
         patch_codex_config_toml(Path(args.path), args.server, args.url)
-        print(f"OK: [mcp_servers.{args.server}] url={args.url} -> {args.path}")
+        # токен не выводим в stdout/журналы — только маску
+        print(f"OK: [mcp_servers.{args.server}] url={_redact_url(args.url)} -> {args.path}")
     elif args.cmd == "remove-codex":
         changed = patch_codex_config_toml(Path(args.path), args.server, url=None)
         print(f"{'OK' if changed else 'NOT FOUND'}: [mcp_servers.{args.server}] удалён -> {args.path}")
     else:  # pragma: no cover
         parser.error(f"unknown command: {args.cmd}")
+

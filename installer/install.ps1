@@ -50,12 +50,84 @@ trap {
 
 Log "Запуск install.ps1"
 
+# -----------------------------------------------------------------------------
+# Запуск HTTP-сервера моста через VBS-лаунчер + MCP health-check.
+# Используется в конце установки, если сервер работал до обновления.
+# -----------------------------------------------------------------------------
+function Start-BridgeHttpServer {
+    $vbs = Join-Path $AppDir 'start_1c_bridge_silent.vbs'
+    if (-not (Test-Path $vbs)) {
+        Log "WARNING: не найден VBS-лаунчер $vbs — HTTP-сервер не запущен"
+        return $false
+    }
+    Log "Запускаю HTTP-сервер моста (VBS-лаунчер)..."
+    & wscript.exe $vbs
+
+    $deadline = (Get-Date).AddSeconds(30)
+    $listening = $false
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $listening = [bool](Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue)
+        } catch {
+            $listening = [bool](netstat -ano | Select-String ':8000\s.*LISTENING')
+        }
+        if ($listening) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $listening) {
+        Log "WARNING: HTTP-сервер не поднялся на порту 8000 за 30 с — смотрите журнал $HttpLogFile"
+        return $false
+    }
+    Log "HTTP-сервер слушает порт 8000."
+
+    # Настоящий MCP health-check (best-effort): initialize + tools/list
+    $hcScript = Join-Path $env:TEMP '1c-bridge-healthcheck.py'
+    @"
+import asyncio
+from mcp import Client
+URL = r"http://127.0.0.1:8000/mcp/$HttpToken"
+async def main():
+    async with Client(URL) as c:
+        t = await c.list_tools()
+        print(len(t.tools))
+asyncio.run(main())
+"@ | Set-Content -Path $hcScript -Encoding UTF8
+    try {
+        $count = (& $VenvPython $hcScript 2>&1 | Select-Object -Last 1)
+        if ($count -match '^\d+$') {
+            Log "HTTP health-check OK: tools/list вернул $count инструментов."
+        } else {
+            Log "WARNING: HTTP health-check: $count"
+        }
+    } catch {
+        Log "WARNING: HTTP health-check не удался: $($_.Exception.Message)"
+    } finally {
+        Remove-Item $hcScript -ErrorAction SilentlyContinue
+    }
+    return $true
+}
+
 # Останавливаем старый HTTP-сервер моста, если он ещё запущен: иначе новый
 # не сможет занять порт 8000, а удаление старого venv упрётся в блокировку.
+# Запоминаем, был ли сервер запущен, чтобы перезапустить его после установки.
+$AppDir = Split-Path $PSScriptRoot -Parent
+$HttpServerWasRunning = $false
+try {
+    $HttpServerWasRunning = [bool](Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue)
+} catch {
+    $HttpServerWasRunning = [bool](netstat -ano | Select-String ':8000\s.*LISTENING')
+}
 $StopServerScript = Join-Path $PSScriptRoot 'stop_http_server.ps1'
 if (Test-Path $StopServerScript) {
     . $StopServerScript
-    Stop-BridgeHttpServer | Out-Null
+    # Точечная остановка: только процесс этой установки (по путям), только порт 8000.
+    $stopOk = Stop-BridgeHttpServer `
+        -Port 8000 `
+        -ExpectedScriptPath (Join-Path $AppDir 'mcp_server_1c_http.py') `
+        -ExpectedPythonPath (Join-Path $AppDir '.venv\Scripts\python.exe')
+    if (-not $stopOk) {
+        throw "Не удалось остановить прежний HTTP-сервер моста (порт 8000 занят). Закройте его вручную и повторите установку."
+    }
 } else {
     Log "WARNING: не найден $StopServerScript — пропускаю остановку HTTP-сервера"
 }
@@ -401,8 +473,19 @@ if not defined ONEC_DATABASES_FILE set ONEC_DATABASES_FILE=$DatabasesFile
 Log "Created npx launcher in $NpxDir"
 
 # --- Create silent VBS launcher for Qwen HTTP server (no console) ---
-$HttpToken = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | % { [char]$_ })
 $TokenFile = Join-Path $NpxDir '.http_token'
+# Токен НЕ меняем при обновлении: иначе ломаются сохранённые URL (Qwen,
+# Secure MCP Tunnel, сторонние клиенты) и старый запущенный процесс.
+if (Test-Path $TokenFile) {
+    $HttpToken = ([IO.File]::ReadAllText($TokenFile)).Trim()
+    if (-not $HttpToken) {
+        $HttpToken = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | % { [char]$_ })
+    }
+    Log "HTTP-токен сохранён (не меняется при обновлении)"
+} else {
+    $HttpToken = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | % { [char]$_ })
+    Log "Создан новый HTTP-токен"
+}
 [System.IO.File]::WriteAllText($TokenFile, $HttpToken, [System.Text.ASCIIEncoding]::new())
 Log "HTTP token saved to $TokenFile"
 
@@ -531,7 +614,7 @@ foreach ($client in $MCPClients) {
         if ($LASTEXITCODE -ne 0) {
             throw "clients_config.py patch-codex завершился с кодом $LASTEXITCODE"
         }
-        Log "$($client.name): config written - $ConfigPath (url $HttpUrl)"
+        Log "$($client.name): config written - $ConfigPath (url http://127.0.0.1:8000/mcp/<token>)"
         $ConfiguredClients += $client.name
         continue
     }
@@ -598,6 +681,16 @@ if ($ConfiguredClients.Count -gt 0) {
     foreach ($c in $MCPClients) {
         Log "  - $($c.name): download at $($c.id).ai or moonshot.cn"
     }
+}
+
+# -----------------------------------------------------------------------------
+# Перезапуск HTTP-сервера после обновления: если он работал до установки —
+# запускаем новый и проверяем его MCP health-check'ом.
+if ($HttpServerWasRunning) {
+    Start-BridgeHttpServer | Out-Null
+} else {
+    Log "HTTP-сервер моста не запущен (до установки он не работал)."
+    Log "Запустите ярлык «1C Bridge (HTTP-сервер)» из меню Пуск, когда понадобится."
 }
 
 # -----------------------------------------------------------------------------
