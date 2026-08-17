@@ -15,8 +15,10 @@ SRC = str(Path(__file__).resolve().parent.parent / "src")
 sys.path.insert(0, SRC)
 
 from event_log import (
+    DEFAULT_DOCUMENT_EVENT_CODES,
     EventLogValidationError,
     build_event_log_filter,
+    classify_event_log_com_error,
     filter_fingerprint,
     is_successful_status,
     make_common_filter,
@@ -62,6 +64,21 @@ class TestDatetime:
     def test_reject_offset(self):
         with pytest.raises(EventLogValidationError) as e:
             parse_local_datetime("2026-05-29T11:02:21+05:00", "f")
+        assert e.value.code == "TIMEZONE_NOT_SUPPORTED"
+
+    def test_reject_offset_without_colon(self):
+        with pytest.raises(EventLogValidationError) as e:
+            parse_local_datetime("2026-05-29T11:02:21+0500", "f")
+        assert e.value.code == "TIMEZONE_NOT_SUPPORTED"
+
+    def test_reject_offset_short(self):
+        with pytest.raises(EventLogValidationError) as e:
+            parse_local_datetime("2026-05-29T11:02:21+05", "f")
+        assert e.value.code == "TIMEZONE_NOT_SUPPORTED"
+
+    def test_reject_lowercase_z(self):
+        with pytest.raises(EventLogValidationError) as e:
+            parse_local_datetime("2026-05-29T11:02:21z", "f")
         assert e.value.code == "TIMEZONE_NOT_SUPPORTED"
 
     def test_reject_garbage(self):
@@ -141,6 +158,42 @@ class TestSelectivity:
             metadata_path=DOC_TYPE,
         )
         assert req.metadata_path == DOC_TYPE
+
+    def test_default_events_applied_for_object_filter(self):
+        # events=None + data_refs -> применяются Post/Unpost/Update
+        req = validate_event_log_request(
+            start_datetime="2026-05-29T00:00:00",
+            end_datetime="2026-08-17T23:59:59",
+            events=None,
+            metadata_path=DOC_TYPE,
+            data_refs=[{"_ref": UUID_A, "_type": DOC_TYPE}],
+        )
+        assert req.events == DEFAULT_DOCUMENT_EVENT_CODES
+
+    def test_default_events_applied_for_document_numbers(self):
+        req = validate_event_log_request(
+            start_datetime="2026-05-29T00:00:00",
+            end_datetime="2026-08-17T23:59:59",
+            events=None,
+            metadata_path=DOC_TYPE,
+            document_numbers=["ААСГ0000070"],
+            document_date_from="2026-05-29T00:00:00",
+            document_date_to="2026-05-30T00:00:00",
+        )
+        assert req.events == DEFAULT_DOCUMENT_EVENT_CODES
+
+    def test_metadata_without_events_still_rejected(self):
+        # metadata_path без events и без объекта -> всё ещё неселективно
+        with pytest.raises(EventLogValidationError) as e:
+            validate_event_log_request(
+                start_datetime="2026-05-29T00:00:00",
+                end_datetime="2026-05-30T00:00:00",
+                events=None,
+                metadata_path=DOC_TYPE,
+                data_refs=None,
+                document_numbers=None,
+            )
+        assert e.value.code == "UNSAFE_UNFILTERED_REQUEST"
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +276,19 @@ class TestDataRefs:
         with pytest.raises(EventLogValidationError) as e:
             _ok(data_refs=[{"_ref": "не-uuid", "_type": DOC_TYPE}])
         assert e.value.code == "INVALID_DATA_REF"
+
+    def test_data_refs_and_document_numbers_conflict(self):
+        with pytest.raises(EventLogValidationError) as e:
+            validate_event_log_request(
+                start_datetime="2026-05-29T00:00:00",
+                end_datetime="2026-05-30T00:00:00",
+                metadata_path=DOC_TYPE,
+                data_refs=[{"_ref": UUID_A, "_type": DOC_TYPE}],
+                document_numbers=["ААСГ0000070"],
+                document_date_from="2026-05-29T00:00:00",
+                document_date_to="2026-05-30T00:00:00",
+            )
+        assert e.value.code == "INVALID_FILTER_COMBINATION"
 
 
 # ---------------------------------------------------------------------------
@@ -368,3 +434,90 @@ class TestFakeCom:
         build_event_log_filter(conn, FAKE_REQUEST, [object()])
         # не должно быть вызовов записи журнала
         assert not hasattr(conn, "ЗаписьЖурналаРегистрации")
+
+
+# ---------------------------------------------------------------------------
+# Fake-COM тест сериализации таблицы журнала (полный путь, без 1С)
+# ---------------------------------------------------------------------------
+
+class TestSerializeTable:
+    def test_limit_keeps_newest_rows(self):
+        """При переполнении сохраняются НАИБОЛЕЕ НОВЫЕ limit строк.
+
+        mcp_server_1c на Windows при импорте переопределяет sys.stdout, что
+        ломает pytest capture, поэтому проверяем в подпроцессе (как это делает
+        tests/test_http_smoke.py для всего сервера).
+        """
+        import subprocess
+
+        script = '''
+import sys
+sys.path.insert(0, "SRC")
+import mcp_server_1c as server
+
+class Cell:
+    def __init__(self, values): self._v = values
+    def Get(self, i): return self._v[i]
+
+class Col:
+    def __init__(self, name): self.Имя = name
+
+class Table:
+    def __init__(self, cols, rows):
+        self.Колонки = [Col(c) for c in cols]
+        self._rows = rows
+    def __iter__(self):
+        for r in self._rows:
+            yield Cell(r)
+
+class Statuses:
+    Зафиксирована = "Зафиксирована"; НетТранзакции = "НетТранзакции"
+    Отменена = "Отменена"; НеЗавершена = "НеЗавершена"
+
+class Conn:
+    СтатусТранзакцииЗаписиЖурналаРегистрации = Statuses()
+    def XMLСтрока(self, v): return "fake-uuid"
+
+conn = Conn()
+cols = ["Дата", "Событие", "Данные", "СтатусТранзакции"]
+rows = [
+    ["2026-05-30T10:00:00", "_$Data$_.Post", "doc-uuid", "Зафиксирована"],
+    ["2026-06-01T10:00:00", "_$Data$_.Update", "doc-uuid", "Зафиксирована"],
+    ["2026-07-09T13:11:44", "_$Data$_.Unpost", "doc-uuid", "Зафиксирована"],
+]
+result, truncated = server.serialize_event_log_table(Table(cols, rows), 2, conn)
+print("TRUNCATED", truncated)
+print("COUNT", len(result))
+for r in result:
+    print("EVENT", r["event"])
+'''
+        # экранируем обратные слэши, иначе \U в Windows-пути сломает unicode-escape
+        safe_src = str(SRC).replace("\\", "\\\\")
+        script = script.replace("SRC", safe_src)
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        out = proc.stdout
+        assert "TRUNCATED True" in out
+        assert "COUNT 2" in out
+        assert "_$Data$_.Unpost" in out
+        assert "_$Data$_.Update" in out
+        assert "_$Data$_.Post" not in out
+
+
+class TestClassifier:
+    def test_access_denied_explicit(self):
+        assert classify_event_log_com_error("Недостаточно прав на журнал регистрации") == "EVENT_LOG_ACCESS_DENIED"
+        assert classify_event_log_com_error("Недостаточно прав") == "EVENT_LOG_ACCESS_DENIED"
+        assert classify_event_log_com_error("Violation insufficient rights") == "EVENT_LOG_ACCESS_DENIED"
+
+    def test_other_error_not_access_denied(self):
+        assert classify_event_log_com_error("Нет доступа к файлу журнала (файл занят)") == "ONEC_ERROR"
+
+    def test_unavailable(self):
+        assert classify_event_log_com_error("Метод не поддерживается этой версией платформы") == "EVENT_LOG_UNAVAILABLE"
+
+    def test_language_unsupported(self):
+        assert classify_event_log_com_error("Колонка не найдена") == "EVENT_LOG_LANGUAGE_UNSUPPORTED"

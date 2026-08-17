@@ -26,6 +26,7 @@ __all__ = [
     "EventLogValidationError",
     "ValidatedEventLogRequest",
     "build_event_log_filter",
+    "classify_event_log_com_error",
     "filter_fingerprint",
     "is_successful_status",
     "make_common_filter",
@@ -33,6 +34,7 @@ __all__ = [
     "onec_array",
     "onec_transaction_statuses",
     "parse_local_datetime",
+    "safe_event_log_error",
     "transaction_status_code",
     "validate_data_ref",
     "validate_document_number",
@@ -118,17 +120,27 @@ def parse_local_datetime(value: str, field: str) -> dt.datetime:
     if not isinstance(value, str) or not value.strip():
         raise EventLogValidationError("INVALID_DATETIME", f"{field}: ожидается ISO-дата")
     raw = value.strip()
-    if raw.endswith("Z") or re.search(r"[+-]\d\d:\d\d$", raw):
+    # Любое смещение UTC-часового пояса или "Z" отклоняется: журнал регистрации
+    # показывает локальное время ИБ без timezone. Покрывает "+05:00", "+0500",
+    # "+05" и trailing "Z".
+    if raw.endswith(("Z", "z")) or re.search(r"[+-]\d{1,2}(:\d{2})?(:\d{2})?$", raw):
         raise EventLogValidationError(
             "TIMEZONE_NOT_SUPPORTED",
             f"{field}: передайте локальное время информационной базы без timezone",
         )
     try:
-        return dt.datetime.fromisoformat(raw)
+        parsed = dt.datetime.fromisoformat(raw)
     except ValueError as exc:
         raise EventLogValidationError(
             "INVALID_DATETIME", f"{field}: некорректная ISO-дата"
         ) from exc
+    # Страховка: даже если regex пропустил, naive datetime обязателен.
+    if parsed.tzinfo is not None:
+        raise EventLogValidationError(
+            "TIMEZONE_NOT_SUPPORTED",
+            f"{field}: передайте локальное время информационной базы без timezone",
+        )
+    return parsed
 
 
 def validate_metadata_path(path: str | None) -> None:
@@ -326,6 +338,12 @@ def validate_event_log_request(
                 "DOCUMENT_DATE_RANGE_REQUIRED",
                 "document_numbers требуют document_date_from и document_date_to",
             )
+        if parsed_refs:
+            raise EventLogValidationError(
+                "INVALID_FILTER_COMBINATION",
+                "data_refs и document_numbers нельзя задавать одновременно — "
+                "выберите один способ точного отбора.",
+            )
     elif document_date_from is not None or document_date_to is not None:
         raise EventLogValidationError(
             "DOCUMENT_DATE_RANGE_REQUIRED",
@@ -350,6 +368,14 @@ def validate_event_log_request(
     # 8. Обязательная селективность
     has_object = bool(parsed_refs)
     has_numbers = bool(clean_numbers)
+
+    # События по умолчанию применяются только при точном объектном фильтре
+    # (data_refs или document_numbers): тогда без явного `events` ищем
+    # Post/Unpost/Update. Запрос только по metadata_path без events остаётся
+    # неселективным и отклоняется.
+    if (events is None or evts == ()) and (has_object or has_numbers):
+        evts = DEFAULT_DOCUMENT_EVENT_CODES
+
     has_events = bool(evts) and bool(metadata_path)
     if not (has_object or has_numbers or has_events):
         raise EventLogValidationError(
@@ -512,3 +538,38 @@ def build_event_log_filter(conn: Any, request: Any, resolved_refs: list[Any]) ->
             filter_1c.Добавить(item)
         return filter_1c
     return make_common_filter(conn, request)
+
+
+def classify_event_log_com_error(message: str) -> str:
+    """По безопасному сообщению COM-ошибки определяет машинный код.
+
+    Порядок важен: сперва самые специфичные признаки, затем узкий ACCESS_DENIED
+    (только явные маркеры права ЖурналРегистрации), иначе — общий ONEC_ERROR.
+    """
+    low = (message or "").lower()
+
+    if any(k in low for k in ("не поддерживается", "does not support", "объект не найден", "method not found", "недоступен", "нет метода")):
+        return "EVENT_LOG_UNAVAILABLE"
+    if any(k in low for k in ("колонк", "column", "язык", "language")):
+        return "EVENT_LOG_LANGUAGE_UNSUPPORTED"
+    # Только явные признаки отсутствия права ЖурналРегистрации (EventLog).
+    if (
+        "недостаточно прав" in low
+        or "нарушение прав" in low
+        or "нет прав" in low
+        or "права журнала" in low
+        or ("insufficient" in low and "right" in low)
+        or "access is denied" in low
+        or "permission denied" in low
+    ):
+        return "EVENT_LOG_ACCESS_DENIED"
+
+    return "ONEC_ERROR"
+
+
+def safe_event_log_error(message: str) -> str:
+    """Сокращает и очищает сообщение об ошибке — без traceback и секретов."""
+    text = (message or "").strip()
+    if len(text) > 500:
+        text = text[:500] + "…"
+    return text

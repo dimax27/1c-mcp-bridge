@@ -93,8 +93,10 @@ from event_log import (
     EventLogAccessError,
     EventLogValidationError,
     build_event_log_filter,
+    classify_event_log_com_error,
     filter_fingerprint,
     onec_array,
+    safe_event_log_error,
     transaction_status_code,
     validate_event_log_request,
 )
@@ -692,28 +694,49 @@ def serialize_event_log_table(
                     ser[key] = serialize_value(v)
 
         rows.append(ser)
-        if len(rows) > limit:
-            truncated = True
-            rows = rows[:limit]
-            break
+
+    # Платформа возвращает последние limit+1 событий; при переполнении нужно
+    # сохранить НАИБОЛЕЕ НОВЫЕ limit строк, а не первые. Сортируем стабильно по
+    # timestamp asc и забираем последние limit (самая новая запись не теряется).
+    if len(rows) > limit:
+        truncated = True
+        rows.sort(key=lambda r: (r.get("timestamp") or "", ), reverse=False)
+        rows = rows[-limit:]
 
     return rows, truncated
 
 
 def _serialize_event_log_ref(v: Any, conn: Any) -> Any:
-    """Ссылка из поля Данные -> {"_ref": uuid, "_type": "..."}."""
+    """Поле Данные -> {"_ref","_type"} для ссылки, либо обычное значение.
+
+    Для большинства событий `Данные` — ссылка на объект 1С. Но для некоторых
+    событий это строка, число, структура или таблица значений. Определяем по
+    наличию `Метаданные()`: если метод есть и возвращает ПолноеИмя — это ссылка
+    (сериализуем через XMLСтрока + Метаданные), иначе возвращаем значение как
+    есть (строка) или через serialize_value.
+    """
     if v is None:
         return None
+    type_name = None
+    try:
+        type_name = str(v.Метаданные().ПолноеИмя())
+    except (AttributeError, pywintypes.com_error):
+        type_name = None
+
+    if type_name is None:
+        # Не ссылка — возвращаем обычное значение (строка/число/структура/таблица)
+        if isinstance(v, (str, int, float, bool)):
+            return v
+        try:
+            return serialize_value(v)
+        except Exception:
+            return str(v)
+
     ref = None
     try:
         ref = conn.XMLСтрока(v)
     except Exception:
         ref = None
-    type_name = None
-    try:
-        type_name = str(v.Метаданные().ПолноеИмя())
-    except Exception:
-        type_name = None
     return {"_ref": ref, "_type": type_name}
 
 
@@ -756,26 +779,6 @@ def _serialize_event_log_datetime(v: Any) -> Any:
                 pass
         return v.isoformat()
     return str(v)
-
-
-def classify_event_log_com_error(message: str) -> str:
-    """По безопасному сообщению COM-ошибки определяет машинный код."""
-    low = message.lower()
-    if any(k in low for k in ("прав", "доступ", "журналрегистрации", "eventlog", "permission", "denied")):
-        return "EVENT_LOG_ACCESS_DENIED"
-    if any(k in low for k in ("метод", "не найден", "не поддерживается", "недоступен", "does not support", "object has no")):
-        return "EVENT_LOG_UNAVAILABLE"
-    if any(k in low for k in ("колонк", "column", "язык", "language")):
-        return "EVENT_LOG_LANGUAGE_UNSUPPORTED"
-    return "ONEC_ERROR"
-
-
-def safe_event_log_error(message: str) -> str:
-    """Сокращает и очищает сообщение об ошибке — без traceback и секретов."""
-    text = (message or "").strip()
-    if len(text) > 500:
-        text = text[:500] + "…"
-    return text
 
 
 def log_event_log_read(

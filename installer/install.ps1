@@ -411,8 +411,18 @@ $dbEntry = @{
     progid = $ProgID
     connection_string = $ConnStr
     notes = ''
-    allow_event_log = $false
 }
+
+# opt-in флаг «Разрешить чтение журнала регистрации» не сбрасываем при
+# переустановке: если база уже была настроена и флаг включён осознанно,
+# сохраняем его. Для НОВОЙ базы по умолчанию — выключено.
+$existingAllow = $dbConfig.databases[$DbKey].allow_event_log
+if ($null -ne $existingAllow) {
+    $dbEntry.allow_event_log = [bool]$existingAllow
+} else {
+    $dbEntry.allow_event_log = $false
+}
+
 if ($DllPath) { $dbEntry.dll_path = $DllPath }
 
 $dbConfig.databases[$DbKey] = $dbEntry
