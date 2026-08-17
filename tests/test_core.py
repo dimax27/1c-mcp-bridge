@@ -192,3 +192,18 @@ class TestLimits:
     def test_hard_limit_bounds_default(self):
         """HARD_LIMIT >= DEFAULT_LIMIT by construction."""
         assert HARD_LIMIT >= DEFAULT_LIMIT
+
+
+from config import (
+    EVENT_LOG_DEFAULT_LIMIT,
+    EVENT_LOG_HARD_LIMIT,
+    EVENT_LOG_MAX_BROAD_RANGE_DAYS,
+    EVENT_LOG_MAX_RANGE_DAYS,
+)
+
+
+def test_event_log_limits_consistency():
+    assert EVENT_LOG_DEFAULT_LIMIT > 0
+    assert EVENT_LOG_HARD_LIMIT >= EVENT_LOG_DEFAULT_LIMIT
+    # широкий период не больше объектного
+    assert EVENT_LOG_MAX_BROAD_RANGE_DAYS <= EVENT_LOG_MAX_RANGE_DAYS

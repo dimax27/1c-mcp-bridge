@@ -80,7 +80,7 @@ function Start-BridgeHttpServer {
     }
     Log "HTTP-сервер слушает порт 8000."
 
-    # Настоящий MCP health-check (единый скрипт healthcheck.py): ровно 5
+    # Настоящий MCP health-check (единый скрипт healthcheck.py): ровно 6
     # инструментов + list_databases. Токен — только в переменной окружения.
     $env:ONEC_HTTP_TOKEN = $HttpToken
     $healthOk = $false
@@ -95,7 +95,7 @@ function Start-BridgeHttpServer {
         Remove-Item Env:\ONEC_HTTP_TOKEN -ErrorAction SilentlyContinue
     }
     if ($healthOk) {
-        Log "HTTP health-check OK: 5 инструментов + list_databases."
+        Log "HTTP health-check OK: 6 инструментов + list_databases."
     } else {
         Log "ERROR: MCP health-check не пройден."
     }
@@ -411,6 +411,7 @@ $dbEntry = @{
     progid = $ProgID
     connection_string = $ConnStr
     notes = ''
+    allow_event_log = $false
 }
 if ($DllPath) { $dbEntry.dll_path = $DllPath }
 

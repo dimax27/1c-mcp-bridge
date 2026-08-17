@@ -70,6 +70,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "..\src\clients_config.py";      DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\config.py";              DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\credentials.py";         DestDir: "{app}";              Flags: ignoreversion
+Source: "..\src\event_log.py";           DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\mcp_server_1c.py";       DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\mcp_server_1c_http.py";  DestDir: "{app}";              Flags: ignoreversion
 Source: "..\src\query_timeout.py";       DestDir: "{app}";              Flags: ignoreversion
@@ -850,7 +851,7 @@ begin
              '  • Qwen / Kimi Desktop: закрыть приложение и запустить заново.' + #13#10 +
              '  • Reasonix: перезапустить приложение.' + #13#10 + #13#10 +
              'В новом чате появится индикатор инструментов с сервером 1c-bridge ' +
-             'и пятью инструментами (execute_query, describe_object, list_metadata, get_object_by_ref, list_databases).';
+             'и шестью инструментами (execute_query, describe_object, list_metadata, get_object_by_ref, list_databases, get_registration_log).';
       MsgBox(Msg, mbInformation, MB_OK);
     end
     else

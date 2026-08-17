@@ -110,6 +110,7 @@ def assemble_db_config(
     notes,
     dll_path="",
     password_modified=False,
+    allow_event_log=False,
 ) -> dict:
     """Собирает конфиг базы из формы.
 
@@ -118,6 +119,10 @@ def assemble_db_config(
     При переходе на Windows-аутентификацию (нет Usr) или смене пользователя
     старый credential не переносится — иначе сервер подставил бы прежний
     пароль к новому/отсутствующему пользователю.
+
+    `allow_event_log` — opt-in разрешение чтения журнала регистрации через MCP.
+    Флаг сохраняется всегда (иначе Manager стёр бы настройку при следующем
+    редактировании базы).
     """
     cfg = {
         "enabled": enabled,
@@ -125,6 +130,7 @@ def assemble_db_config(
         "progid": progid,
         "connection_string": connection_string,
         "notes": notes,
+        "allow_event_log": bool(allow_event_log),
     }
     if dll_path:
         cfg["dll_path"] = dll_path
@@ -446,6 +452,15 @@ class ManagerApp(tk.Tk):
         self.text_notes.grid(row=row, column=1, columnspan=2, sticky="ewns", pady=(8, 2))
         row += 1
 
+        # Разрешение чтения журнала регистрации через MCP (opt-in, по умолчанию выкл)
+        self.var_event_log = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            right,
+            text="Разрешить чтение журнала регистрации через MCP",
+            variable=self.var_event_log,
+        ).grid(row=row, column=1, columnspan=2, sticky="w", pady=(4, 2))
+        row += 1
+
         # Кнопки внизу формы
         btn_frame = ttk.Frame(right)
         btn_frame.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(12, 4))
@@ -584,6 +599,9 @@ class ManagerApp(tk.Tk):
         # Notes
         self.text_notes.delete("1.0", tk.END)
         self.text_notes.insert("1.0", cfg.get("notes", ""))
+
+        # Журнал регистрации (opt-in)
+        self.var_event_log.set(bool(cfg.get("allow_event_log", False)))
 
         self._on_type_change()
         self._on_auth_change()
@@ -800,6 +818,7 @@ class ManagerApp(tk.Tk):
             "progid": "V83.COMConnector",
             "connection_string": 'Srvr="127.0.0.1";Ref=""',
             "notes": "",
+            "allow_event_log": False,
         }
         if not self.config_data["default_database"]:
             self.config_data["default_database"] = key
@@ -867,6 +886,7 @@ class ManagerApp(tk.Tk):
             notes=self.text_notes.get("1.0", "end-1c").strip(),
             dll_path=dll,
             password_modified=self._password_modified,
+            allow_event_log=self.var_event_log.get(),
         )
         self.config_data["databases"][key] = cfg
         self.current_key = key
@@ -982,7 +1002,8 @@ def main():
     # Привязываем к каждому изменению
     for var in [app.var_key, app.var_description, app.var_progid, app.var_type,
                 app.var_server, app.var_ref, app.var_file,
-                app.var_user, app.var_password, app.var_os_auth, app.var_enabled]:
+                app.var_user, app.var_password, app.var_os_auth, app.var_enabled,
+                app.var_event_log]:
         var.trace_add("write", mark_dirty)
     app.text_notes.bind("<KeyRelease>", lambda e: mark_dirty())
 

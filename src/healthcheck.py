@@ -4,7 +4,7 @@
 скриптами (restart_http_server.ps1), чтобы проверки не расходились:
 
   * сервер отвечает на streamable-http /mcp/<токен>;
-  * tools/list возвращает ВСЕ пять инструментов моста;
+  * tools/list возвращает ВСЕ шесть инструментов моста;
   * list_databases вызывается без ошибки.
 
 Режим `--com` дополнительно проверяет COM-подключение и метаданные каждой
@@ -34,6 +34,7 @@ EXPECTED_TOOLS = {
     "describe_object",
     "execute_query",
     "get_object_by_ref",
+    "get_registration_log",
     "list_databases",
     "list_metadata",
 }
@@ -205,7 +206,7 @@ async def run(args) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="healthcheck.py",
-        description="MCP health-check моста 1C (5 инструментов + list_databases; "
+        description="MCP health-check моста 1C (6 инструментов + list_databases; "
         "с --com ещё и COM/метаданные каждой базы).",
     )
     parser.add_argument(

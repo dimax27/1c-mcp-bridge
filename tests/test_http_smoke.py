@@ -33,6 +33,7 @@ EXPECTED_TOOLS = [
     "describe_object",
     "execute_query",
     "get_object_by_ref",
+    "get_registration_log",
     "list_databases",
     "list_metadata",
 ]
@@ -281,7 +282,7 @@ def _decode_process_output(data: bytes | None) -> str:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="нужен PowerShell/Windows")
 def test_shared_healthcheck_script(start_server):
-    """src/healthcheck.py — единая проверка (5 инструментов + list_databases):
+    """src/healthcheck.py — единая проверка (6 инструментов + list_databases):
     успех с верным токеном, отказ с неверным."""
     ctx = start_server()
     env = dict(os.environ)

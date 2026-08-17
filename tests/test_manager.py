@@ -88,6 +88,33 @@ def test_assemble_dll_path_preserved():
     assert cfg["dll_path"] == r"C:\Program Files\1cv8\bin\comcntr.dll"
 
 
+def test_assemble_defaults_event_log_disabled():
+    """Новая база по умолчанию создаётся с выключенным чтением журнала."""
+    cfg = assemble_db_config(
+        None,
+        enabled=True,
+        description="Новая",
+        progid="V83.COMConnector",
+        connection_string="Srvr=1.2.3.4;Ref=x",
+        notes="",
+    )
+    assert cfg["allow_event_log"] is False
+
+
+def test_assemble_preserves_event_log_flag():
+    """allow_event_log сохраняется при редактировании базы (не стирается Manager)."""
+    cfg = assemble_db_config(
+        None,
+        enabled=True,
+        description="",
+        progid="V83.COMConnector",
+        connection_string="Srvr=1.2.3.4;Ref=x",
+        notes="",
+        allow_event_log=True,
+    )
+    assert cfg["allow_event_log"] is True
+
+
 def test_resolve_plaintext_passthrough():
     conn = 'Srvr=1.2.3.4;Ref=x;Usr="u";Pwd="p"'
     assert resolve_connection_string(LEGACY_CFG, conn, False) == conn

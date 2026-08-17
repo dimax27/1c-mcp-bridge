@@ -84,7 +84,7 @@ if (-not $token) {
 }
 
 $env:ONEC_HTTP_TOKEN = $token
-# Единый MCP health-check (src/healthcheck.py): ровно 5 инструментов +
+# Единый MCP health-check (src/healthcheck.py): ровно 6 инструментов +
 # list_databases. Токен — только в переменной окружения.
 $hcLine = $null
 try {
