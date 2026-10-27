@@ -60,3 +60,38 @@ def test_critical_modules_present():
     for name in ("config.py", "credentials.py", "query_timeout.py",
                  "mcp_server_1c.py", "mcp_server_1c_http.py", "clients_config.py"):
         assert name in packaged, f"Модуль {name} не попал в установщик"
+
+
+INSTALL_PS1 = REPO / "installer" / "install.ps1"
+
+# У Tee-Object параметр -Encoding есть только в PowerShell 7. Установщик
+# (и ярлыки) запускают Windows PowerShell 5.1, где такого параметра нет.
+_TEE_ENCODING = re.compile(r"Tee-Object[^\r\n]*-Encoding", re.IGNORECASE)
+
+
+def _read_text(path: Path) -> str:
+    raw = path.read_bytes()
+    for enc in ("utf-8-sig", "cp1251"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def test_install_ps1_uses_only_powershell51_parameters():
+    """install.ps1 не должен вызывать `Tee-Object -Encoding` (регресс v0.6.1).
+
+    Установщик запускает install.ps1 скрыто в Windows PowerShell 5.1.
+    Первый же вызов Log падает с ParameterBindingException, пост-установочный
+    этап молча не выполняется: нет .venv, databases.json, токена и задачи
+    Планировщика — мост не запускается, а в логах пусто.
+    """
+    text = _read_text(INSTALL_PS1)
+    offenders = _TEE_ENCODING.findall(text)
+    assert not offenders, (
+        "install.ps1 использует `Tee-Object -Encoding` (есть только в PowerShell 7), "
+        f"из-за чего установка падает на PowerShell 5.1: {offenders}. "
+        "Пишите лог через `Write-Host` + `Add-Content -Encoding UTF8`."
+    )
+
