@@ -22,7 +22,9 @@ $LogPath = Join-Path $PSScriptRoot 'install.log'
 function Log {
     param([string]$Message)
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    "$ts  $Message" | Tee-Object -FilePath $LogPath -Append -Encoding UTF8 | Out-Host
+    $line = "$ts  $Message"
+    Write-Host $line
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
 }
 
 # Крупный заголовок этапа — чтобы пользователь видел что сейчас делается
@@ -259,11 +261,11 @@ $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 # -----------------------------------------------------------------------------
 Stage "Установка Python-зависимостей (pywin32, mcp)"
 Log "Обновляю pip..."
-& $VenvPython -m pip install --upgrade pip 2>&1 | Tee-Object -FilePath $LogPath -Append -Encoding UTF8
+& $VenvPython -m pip install --upgrade pip 2>&1 | ForEach-Object { Write-Host $_; Add-Content -LiteralPath $LogPath -Value $_ -Encoding UTF8 }
 
 Log "Устанавливаю зависимости из requirements.txt..."
 & $VenvPython -m pip install -r (Join-Path $AppDir 'requirements.txt') 2>&1 |
-    Tee-Object -FilePath $LogPath -Append -Encoding UTF8
+    ForEach-Object { Write-Host $_; Add-Content -LiteralPath $LogPath -Value $_ -Encoding UTF8 }
 if ($LASTEXITCODE -ne 0) { throw "pip install вернул $LASTEXITCODE" }
 
 # -----------------------------------------------------------------------------
